@@ -3,6 +3,15 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { CreateOrderDto, UpdateOrderStatusDto } from './dto/order.dto.js';
 
+const SAFE_BUYER_SELECT = {
+  id: true,
+  phone: true,
+  fullName: true,
+  role: true,
+  area: true,
+  ward: true,
+} as const;
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -25,7 +34,7 @@ export class OrdersService {
           })),
         },
       },
-      include: { items: true, buyer: true, organization: true },
+      include: { items: true, buyer: { select: SAFE_BUYER_SELECT }, organization: true },
     });
 
     await this.notifications.notifyOrderCreated(order);
@@ -43,7 +52,7 @@ export class OrdersService {
   findByOrganization(organizationId: string) {
     return this.prisma.order.findMany({
       where: { organizationId },
-      include: { items: true, buyer: true },
+      include: { items: true, buyer: { select: SAFE_BUYER_SELECT } },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -67,7 +76,7 @@ export class OrdersService {
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: dto.status },
-      include: { buyer: true, organization: true },
+      include: { buyer: { select: SAFE_BUYER_SELECT }, organization: true },
     });
 
     await this.notifications.notifyOrderStatusChanged(updated);
