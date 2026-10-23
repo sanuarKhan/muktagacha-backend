@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  BUYER
+  VENDOR
+  PROVIDER
+  ADMIN
+}
+
+enum Vertical {
+  MARKETPLACE
+  PHARMACY
+  SERVICES
+}
+
+enum ListingType {
+  PRODUCT
+  SERVICE
+  MEDICINE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH_ON_DELIVERY
+  BKASH
+  NAGAD
+}
+
+model User {
+  id           String   @id @default(uuid())
+  phone        String   @unique
+  passwordHash String
+  fullName     String
+  role         UserRole @default(BUYER)
+  area         String?
+  ward         String?
+  createdAt    DateTime @default(now())
+  deletedAt    DateTime?
+
+  organizations Organization[]
+  orders        Order[]
+
+  @@index([area, ward])
+  @@map("users")
+}
+
+model Organization {
+  id                String         @id @default(uuid())
+  ownerUserId       String
+  owner             User           @relation(fields: [ownerUserId], references: [id])
+  name              String
+  vertical          Vertical
+  area              String?
+  ward              String?
+  deliveryRadiusKm  Decimal?       @db.Decimal(4, 1)
+  approvalStatus    ApprovalStatus @default(PENDING)
+  createdAt         DateTime       @default(now())
+
+  listings Listing[]
+  orders   Order[]
+
+  @@index([ownerUserId])
+  @@index([area, ward, vertical])
+  @@map("organizations")
+}
+
+model Listing {
+  id             String      @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  type           ListingType
+  name           String
+  price          Decimal?    @db.Decimal(10, 2)
+  category       String?
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+
+  orderItems OrderItem[]
+
+  @@index([organizationId])
+  @@index([type, category])
+  @@map("listings")
+}
+
+model Order {
+  id             String        @id @default(uuid())
+  buyerId        String
+  buyer          User          @relation(fields: [buyerId], references: [id])
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  status         OrderStatus   @default(PENDING)
+  paymentMethod  PaymentMethod
+  createdAt      DateTime      @default(now())
+
+  items OrderItem[]
+
+  @@index([buyerId])
+  @@index([organizationId, status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id])
+  quantity  Int     @default(1)
+  price     Decimal @db.Decimal(10, 2)
+
+  @@index([orderId])
+  @@map("order_items")
+}
