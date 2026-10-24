@@ -68,6 +68,7 @@ model Organization {
   ownerUserId       String
   owner             User           @relation(fields: [ownerUserId], references: [id])
   name              String
+  logoUrl           String?        @db.Text
   vertical          Vertical
   area              String?
   ward              String?
@@ -89,6 +90,8 @@ model Listing {
   organization   Organization @relation(fields: [organizationId], references: [id])
   type           ListingType
   name           String
+  description    String?     @db.Text
+  imageUrl       String?     @db.Text
   price          Decimal?    @db.Decimal(10, 2)
   category       String?
   isActive       Boolean     @default(true)
