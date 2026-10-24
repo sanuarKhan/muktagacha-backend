@@ -12,6 +12,8 @@ export class ListingsService {
         organizationId: dto.organizationId,
         type: dto.type,
         name: dto.name,
+        description: dto.description,
+        imageUrl: dto.imageUrl,
         price: dto.price,
         category: dto.category,
       },

@@ -15,6 +15,7 @@ export class OrganizationsService {
       data: {
         ownerUserId,
         name: dto.name,
+        logoUrl: dto.logoUrl,
         vertical: dto.vertical,
         area: dto.area,
         ward: dto.ward,
