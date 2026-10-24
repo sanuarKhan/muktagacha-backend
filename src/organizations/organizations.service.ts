@@ -20,9 +20,21 @@ export class OrganizationsService {
         area: dto.area,
         ward: dto.ward,
         deliveryRadiusKm: dto.deliveryRadiusKm,
+        bkashNumber: dto.bkashNumber,
+        nagadNumber: dto.nagadNumber,
         approvalStatus: 'PENDING',
       },
     });
+  }
+
+  async updatePaymentNumbers(
+    id: string,
+    userId: string,
+    role: string,
+    data: { bkashNumber?: string; nagadNumber?: string },
+  ) {
+    await this.assertOwnerOrAdmin(id, userId, role);
+    return this.prisma.organization.update({ where: { id }, data });
   }
 
   findMine(ownerUserId: string) {

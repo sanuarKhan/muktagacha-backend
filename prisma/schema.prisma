@@ -19,12 +19,6 @@ enum Vertical {
   SERVICES
 }
 
-enum ListingType {
-  PRODUCT
-  SERVICE
-  MEDICINE
-}
-
 enum ApprovalStatus {
   PENDING
   APPROVED
@@ -43,6 +37,17 @@ enum PaymentMethod {
   CASH_ON_DELIVERY
   BKASH
   NAGAD
+}
+
+// Buyer submits a TrxID after paying the vendor's bKash/Nagad number
+// directly; vendor (or admin) manually confirms the payment actually
+// landed. This is the SkodePay pattern: money never touches our
+// platform, we only verify. See v3 architecture plan, Section 6, Path A.
+enum PaymentVerificationStatus {
+  NOT_SUBMITTED
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
 }
 
 model User {
@@ -76,32 +81,108 @@ model Organization {
   approvalStatus    ApprovalStatus @default(PENDING)
   createdAt         DateTime       @default(now())
 
-  listings Listing[]
-  orders   Order[]
+  // Where the vendor receives payment (shown to buyers at checkout).
+  // Buyer pays this number directly via bKash/Nagad app, then submits
+  // the TrxID on the order for the vendor to verify.
+  bkashNumber       String?
+  nagadNumber       String?
+
+  // Vendor's own Cloudinary account (optional). If set, product/shop
+  // images this vendor uploads go to THEIR Cloudinary storage/bandwidth
+  // quota instead of ours - keeps platform image costs at zero as the
+  // vendor base grows. apiSecret is encrypted at rest (AES-256-GCM, see
+  // src/crypto/secret-crypto.service.ts) - never stored or returned as
+  // plaintext outside the upload-signing request itself.
+  cloudinaryCloudName    String?
+  cloudinaryApiKey       String?
+  cloudinaryApiSecretEnc String? @db.Text
+
+  listings  Product[]
+  orders    Order[]
 
   @@index([ownerUserId])
   @@index([area, ward, vertical])
   @@map("organizations")
 }
 
-model Listing {
-  id             String      @id @default(uuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  type           ListingType
-  name           String
-  description    String?     @db.Text
-  imageUrl       String?     @db.Text
-  price          Decimal?    @db.Decimal(10, 2)
-  category       String?
-  isActive       Boolean     @default(true)
-  createdAt      DateTime    @default(now())
+// Managed taxonomy - admin creates/edits these; vendors pick from the
+// list instead of typing free text. Self-referencing tree so e.g.
+// Clothing > Men's > Panjabi works without a separate subcategory table.
+model Category {
+  id        String     @id @default(uuid())
+  name      String
+  slug      String     @unique
+  vertical  Vertical
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+  sortOrder Int        @default(0)
+  isActive  Boolean    @default(true)
 
-  orderItems OrderItem[]
+  products  Product[]
+
+  @@index([vertical, parentId])
+  @@map("categories")
+}
+
+model Product {
+  id             String        @id @default(uuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  categoryId     String?
+  category       Category?     @relation(fields: [categoryId], references: [id])
+
+  name           String
+  slug           String
+  description    String?       @db.Text
+  basePrice      Decimal       @db.Decimal(10, 2)
+  hasVariants    Boolean       @default(false)
+
+  images         ProductImage[]
+  variants       ProductVariant[]
+  orderItems     OrderItem[]
+
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@index([organizationId])
-  @@index([type, category])
-  @@map("listings")
+  @@index([categoryId])
+  @@index([organizationId, isActive])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String  @db.Text
+  sortOrder Int     @default(0)
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+// Only created when Product.hasVariants = true. One row per purchasable
+// combination (e.g. "Red / Large") with its own optional price override
+// and stock count. optionValues is a flexible JSON map ({"size":"L",
+// "color":"Red"}) rather than a rigid attribute schema, since every
+// vertical has different variant dimensions (clothing: size/color;
+// groceries: weight; services: duration).
+model ProductVariant {
+  id            String   @id @default(uuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku           String?
+  optionValues  Json
+  priceOverride Decimal? @db.Decimal(10, 2)
+  stockCount    Int      @default(0)
+  isActive      Boolean  @default(true)
+
+  orderItems    OrderItem[]
+
+  @@index([productId])
+  @@map("product_variants")
 }
 
 model Order {
@@ -114,6 +195,12 @@ model Order {
   paymentMethod  PaymentMethod
   createdAt      DateTime      @default(now())
 
+  // Buyer-submitted proof of payment for BKASH/NAGAD orders (irrelevant
+  // for CASH_ON_DELIVERY, which stays NOT_SUBMITTED/unused).
+  paymentTrxId          String?
+  paymentVerification   PaymentVerificationStatus @default(NOT_SUBMITTED)
+  paymentVerifiedAt     DateTime?
+
   items OrderItem[]
 
   @@index([buyerId])
@@ -122,13 +209,15 @@ model Order {
 }
 
 model OrderItem {
-  id        String  @id @default(uuid())
+  id        String          @id @default(uuid())
   orderId   String
-  order     Order   @relation(fields: [orderId], references: [id])
-  listingId String
-  listing   Listing @relation(fields: [listingId], references: [id])
-  quantity  Int     @default(1)
-  price     Decimal @db.Decimal(10, 2)
+  order     Order           @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product         @relation(fields: [productId], references: [id])
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+  quantity  Int             @default(1)
+  price     Decimal         @db.Decimal(10, 2)
 
   @@index([orderId])
   @@map("order_items")

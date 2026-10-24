@@ -9,7 +9,12 @@ import {
   Req,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service.js';
-import { CreateOrderDto, UpdateOrderStatusDto } from './dto/order.dto.js';
+import {
+  CreateOrderDto,
+  UpdateOrderStatusDto,
+  SubmitPaymentProofDto,
+  VerifyPaymentDto,
+} from './dto/order.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 
 @Controller('orders')
@@ -39,6 +44,33 @@ export class OrdersController {
     @Body() dto: UpdateOrderStatusDto,
   ) {
     return this.ordersService.updateStatus(
+      id,
+      req.user.userId,
+      req.user.role,
+      dto,
+    );
+  }
+
+  // Buyer submits a TrxID after paying the vendor's bKash/Nagad number
+  // directly - see v3 plan Section 6, Path A (no real payment gateway,
+  // honest manual verification instead).
+  @Post(':id/payment-proof')
+  submitPaymentProof(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: SubmitPaymentProofDto,
+  ) {
+    return this.ordersService.submitPaymentProof(id, req.user.userId, dto);
+  }
+
+  // Vendor (or admin) confirms/rejects the buyer's submitted TrxID.
+  @Patch(':id/verify-payment')
+  verifyPayment(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: VerifyPaymentDto,
+  ) {
+    return this.ordersService.verifyPayment(
       id,
       req.user.userId,
       req.user.role,

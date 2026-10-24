@@ -22,4 +22,12 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsNumber()
   deliveryRadiusKm?: number;
+
+  @IsOptional()
+  @IsString()
+  bkashNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  nagadNumber?: string;
 }

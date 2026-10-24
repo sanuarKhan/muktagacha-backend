@@ -20,18 +20,20 @@ export class AdminController {
       approvedVendors,
       pendingVendors,
       rejectedVendors,
-      totalListings,
-      activeListings,
+      totalProducts,
+      activeProducts,
       totalOrders,
+      pendingPaymentVerifications,
     ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.organization.count(),
       this.prisma.organization.count({ where: { approvalStatus: 'APPROVED' } }),
       this.prisma.organization.count({ where: { approvalStatus: 'PENDING' } }),
       this.prisma.organization.count({ where: { approvalStatus: 'REJECTED' } }),
-      this.prisma.listing.count(),
-      this.prisma.listing.count({ where: { isActive: true } }),
+      this.prisma.product.count(),
+      this.prisma.product.count({ where: { isActive: true } }),
       this.prisma.order.count(),
+      this.prisma.order.count({ where: { paymentVerification: 'PENDING_VERIFICATION' } }),
     ]);
     return {
       totalUsers,
@@ -39,9 +41,10 @@ export class AdminController {
       approvedVendors,
       pendingVendors,
       rejectedVendors,
-      totalListings,
-      activeListings,
+      totalProducts,
+      activeProducts,
       totalOrders,
+      pendingPaymentVerifications,
     };
   }
 

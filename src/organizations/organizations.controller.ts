@@ -44,6 +44,23 @@ export class OrganizationsController {
     return this.orgsService.findMine(req.user.userId);
   }
 
+  // Vendor updates their own bKash/Nagad numbers shown to buyers at
+  // checkout (manual-payment verification flow, v3 plan Section 6).
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/payment-numbers')
+  updatePaymentNumbers(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { bkashNumber?: string; nagadNumber?: string },
+  ) {
+    return this.orgsService.updatePaymentNumbers(
+      id,
+      req.user.userId,
+      req.user.role,
+      body,
+    );
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Get('pending')
