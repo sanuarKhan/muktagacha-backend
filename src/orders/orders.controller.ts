@@ -85,4 +85,19 @@ export class OrdersController {
       dto,
     );
   }
+
+  // Creates a real SkodePay hosted-checkout transaction for this order
+  // (buyer chose SKODEPAY as the payment method). Returns the checkout
+  // URL to redirect the buyer to.
+  @Post(':id/skodepay-checkout')
+  createSkodePayCheckout(@Req() req: any, @Param('id') id: string) {
+    return this.ordersService.createSkodePayCheckout(id, req.user.userId);
+  }
+
+  // Buyer returns from SkodePay's hosted page - checks whether the
+  // payment actually completed and moves the order to CONFIRMED if so.
+  @Post(':id/skodepay-status')
+  checkSkodePayStatus(@Req() req: any, @Param('id') id: string) {
+    return this.ordersService.checkSkodePayStatus(id, req.user.userId);
+  }
 }

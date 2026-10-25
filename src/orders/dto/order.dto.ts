@@ -27,8 +27,8 @@ export class CreateOrderDto {
   @IsString()
   organizationId: string;
 
-  @IsIn(['CASH_ON_DELIVERY', 'BKASH', 'NAGAD'])
-  paymentMethod: 'CASH_ON_DELIVERY' | 'BKASH' | 'NAGAD';
+  @IsIn(['CASH_ON_DELIVERY', 'BKASH', 'NAGAD', 'SKODEPAY'])
+  paymentMethod: 'CASH_ON_DELIVERY' | 'BKASH' | 'NAGAD' | 'SKODEPAY';
 
   @IsArray()
   @ValidateNested({ each: true })

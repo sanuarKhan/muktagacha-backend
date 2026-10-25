@@ -38,6 +38,7 @@ enum PaymentMethod {
   CASH_ON_DELIVERY
   BKASH
   NAGAD
+  SKODEPAY
 }
 
 // Buyer submits a TrxID after paying the vendor's bKash/Nagad number
@@ -99,6 +100,16 @@ model Organization {
   cloudinaryCloudName    String?
   cloudinaryApiKey       String?
   cloudinaryApiSecretEnc String? @db.Text
+
+  // Vendor's own SkodePay account (optional, same opt-in pattern as
+  // Cloudinary above). When set, checkout for this vendor's orders can
+  // create a real SkodePay hosted-payment-link transaction instead of
+  // (or alongside) the manual bKash/Nagad-number + TrxID flow. The API
+  // key is encrypted at rest with the same AES-256-GCM service used for
+  // the Cloudinary secret - never stored or returned as plaintext
+  // outside the one request that actually calls SkodePay's API.
+  skodePayApiKeyEnc String? @db.Text
+  skodePayEnabled   Boolean @default(false)
 
   listings  Product[]
   orders    Order[]
@@ -215,6 +226,13 @@ model Order {
   rider        User?     @relation("RiderDeliveries", fields: [riderId], references: [id])
   deliveryNote String?   @db.Text
   deliveredAt  DateTime?
+
+  // When paymentMethod is SKODEPAY: the real hosted-checkout transaction
+  // created on the vendor's own SkodePay account. skodePayRef is
+  // SkodePay's 27-digit transaction reference (used to check status and
+  // to match the webhook callback back to this order).
+  skodePayRef         String?
+  skodePayCheckoutUrl String? @db.Text
 
   items OrderItem[]
 

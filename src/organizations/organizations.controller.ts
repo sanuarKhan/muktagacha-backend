@@ -61,6 +61,24 @@ export class OrganizationsController {
     );
   }
 
+  // Vendor connects their own SkodePay merchant account for real hosted
+  // checkout (bKash/Nagad/card via SkodePay, as an alternative to the
+  // manual pay-direct-and-submit-TrxID flow).
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/skodepay-settings')
+  updateSkodePaySettings(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { apiKey?: string; enabled?: boolean },
+  ) {
+    return this.orgsService.updateSkodePaySettings(
+      id,
+      req.user.userId,
+      req.user.role,
+      body,
+    );
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Get('pending')

@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { SkodePayService } from '../skodepay/skodepay.service.js';
 import {
   CreateOrderDto,
   UpdateOrderStatusDto,
@@ -22,6 +23,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private skodePay: SkodePayService,
   ) {}
 
   // Price comes from the server's own Product/ProductVariant record, NEVER
@@ -172,6 +174,85 @@ export class OrdersService {
       throw new ForbiddenException("This isn't your order");
     }
     return order;
+  }
+
+  // Creates a real SkodePay hosted-checkout transaction for an existing
+  // order (buyer picked SKODEPAY as the payment method). Only the
+  // buyer who placed the order can start this - it costs the vendor's
+  // SkodePay account a transaction attempt, so no one else should be
+  // able to trigger it.
+  async createSkodePayCheckout(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.buyerId !== userId) {
+      throw new ForbiddenException("This isn't your order");
+    }
+    if (order.paymentMethod !== 'SKODEPAY') {
+      throw new BadRequestException('This order was not placed with SkodePay');
+    }
+    if (order.skodePayCheckoutUrl) {
+      // Already started - return the existing link instead of creating
+      // a second transaction for the same order.
+      return { ref: order.skodePayRef, checkoutUrl: order.skodePayCheckoutUrl };
+    }
+
+    const buyer = await this.prisma.user.findUnique({ where: { id: userId } });
+    const total = order.items.reduce(
+      (sum, it) => sum + Number(it.price) * it.quantity,
+      0,
+    );
+
+    const checkout = await this.skodePay.createCheckout(
+      order.organizationId,
+      total,
+      buyer?.fullName || 'Buyer',
+      buyer?.phone || '',
+      order.id,
+    );
+
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { skodePayRef: checkout.ref, skodePayCheckoutUrl: checkout.checkoutUrl },
+    });
+
+    return checkout;
+  }
+
+  // Buyer returns from SkodePay's hosted checkout page - checks the
+  // real transaction status and, if SkodePay confirms it completed,
+  // moves the order to CONFIRMED (same effect as a manually-verified
+  // bKash/Nagad payment, just with SkodePay having done the real
+  // verification instead of the vendor eyeballing their SMS).
+  async checkSkodePayStatus(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.buyerId !== userId) {
+      throw new ForbiddenException("This isn't your order");
+    }
+    if (!order.skodePayRef) {
+      throw new BadRequestException('No SkodePay checkout was started for this order');
+    }
+
+    const status = await this.skodePay.checkStatus(order.organizationId, order.skodePayRef);
+
+    if (status === 'completed' && order.status === 'PENDING') {
+      const updated = await this.prisma.order.update({
+        where: { id: orderId },
+        data: { status: 'CONFIRMED', paymentVerification: 'VERIFIED', paymentVerifiedAt: new Date() },
+        include: {
+          buyer: { select: SAFE_BUYER_SELECT },
+          organization: true,
+          items: { include: { product: true, variant: true } },
+        },
+      });
+      await this.notifications.notifyOrderStatusChanged(updated);
+      return { status: 'completed', order: updated };
+    }
+
+    return { status };
   }
 
   async updateStatus(
