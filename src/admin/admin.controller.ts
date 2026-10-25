@@ -59,4 +59,20 @@ export class AdminController {
       include: { owner: true, _count: { select: { listings: true } } },
     });
   }
+
+  // Admin-only: every order across every vendor, for the platform-wide
+  // order management view (roadmap item 6: search/filter/status overview).
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Get('orders')
+  async allOrders() {
+    return this.prisma.order.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        buyer: { select: { id: true, fullName: true, phone: true } },
+        organization: { select: { id: true, name: true } },
+        items: true,
+      },
+    });
+  }
 }
