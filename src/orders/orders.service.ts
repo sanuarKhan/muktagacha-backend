@@ -102,6 +102,8 @@ export class OrdersService {
           organizationId: dto.organizationId,
           paymentMethod: dto.paymentMethod,
           status: 'PENDING',
+          deliveryLatitude: dto.deliveryLatitude,
+          deliveryLongitude: dto.deliveryLongitude,
           // Manual-MFS orders need a TrxID before the vendor will confirm
           // them; cash orders have nothing to verify.
           paymentVerification:

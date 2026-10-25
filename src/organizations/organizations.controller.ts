@@ -79,6 +79,24 @@ export class OrganizationsController {
     );
   }
 
+  // Vendor pins their shop's real location on the free OpenStreetMap
+  // picker (Settings -> Location) - shown to buyers on the storefront
+  // page so they can see exactly where the shop is.
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/location')
+  updateLocation(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { latitude: number; longitude: number },
+  ) {
+    return this.orgsService.updateLocation(
+      id,
+      req.user.userId,
+      req.user.role,
+      body,
+    );
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Get('pending')

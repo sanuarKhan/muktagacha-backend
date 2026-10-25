@@ -30,4 +30,12 @@ export class CreateOrganizationDto {
   @IsOptional()
   @IsString()
   nagadNumber?: string;
+
+  @IsOptional()
+  @IsNumber()
+  latitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  longitude?: number;
 }

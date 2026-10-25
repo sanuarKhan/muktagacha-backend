@@ -24,8 +24,23 @@ export class OrganizationsService {
         deliveryRadiusKm: dto.deliveryRadiusKm,
         bkashNumber: dto.bkashNumber,
         nagadNumber: dto.nagadNumber,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
         approvalStatus: 'PENDING',
       },
+    });
+  }
+
+  async updateLocation(
+    id: string,
+    userId: string,
+    role: string,
+    data: { latitude: number; longitude: number },
+  ) {
+    await this.assertOwnerOrAdmin(id, userId, role);
+    return this.prisma.organization.update({
+      where: { id },
+      data: { latitude: data.latitude, longitude: data.longitude },
     });
   }
 

@@ -85,6 +85,13 @@ model Organization {
   approvalStatus    ApprovalStatus @default(PENDING)
   createdAt         DateTime       @default(now())
 
+  // Shop's physical location, shown on the free Leaflet/OpenStreetMap
+  // map on their storefront page (no Google Maps API key needed - see
+  // google-maps-free-alternative note in riders.service.ts). Optional:
+  // a vendor who hasn't pinned their location yet just shows no map.
+  latitude  Decimal? @db.Decimal(10, 7)
+  longitude Decimal? @db.Decimal(10, 7)
+
   // Where the vendor receives payment (shown to buyers at checkout).
   // Buyer pays this number directly via bKash/Nagad app, then submits
   // the TrxID on the order for the vendor to verify.
@@ -233,6 +240,13 @@ model Order {
   // to match the webhook callback back to this order).
   skodePayRef         String?
   skodePayCheckoutUrl String? @db.Text
+
+  // Buyer's delivery drop-off pin, set optionally at checkout (e.g. by
+  // tapping their location on the map) so the rider has an exact point
+  // instead of just a free-text area/ward. Nullable - plenty of orders
+  // will still just use the buyer's area/ward text address.
+  deliveryLatitude  Decimal? @db.Decimal(10, 7)
+  deliveryLongitude Decimal? @db.Decimal(10, 7)
 
   items OrderItem[]
 

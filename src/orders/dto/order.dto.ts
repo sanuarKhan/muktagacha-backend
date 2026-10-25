@@ -30,6 +30,14 @@ export class CreateOrderDto {
   @IsIn(['CASH_ON_DELIVERY', 'BKASH', 'NAGAD', 'SKODEPAY'])
   paymentMethod: 'CASH_ON_DELIVERY' | 'BKASH' | 'NAGAD' | 'SKODEPAY';
 
+  @IsOptional()
+  @IsNumber()
+  deliveryLatitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  deliveryLongitude?: number;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
