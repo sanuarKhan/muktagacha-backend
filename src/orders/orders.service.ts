@@ -193,7 +193,11 @@ export class OrdersService {
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: dto.status },
-      include: { buyer: { select: SAFE_BUYER_SELECT }, organization: true },
+      include: {
+        buyer: { select: SAFE_BUYER_SELECT },
+        organization: true,
+        items: { include: { product: true, variant: true } },
+      },
     });
 
     // Cancelling an order that had stock reserved gives it back - a
@@ -257,7 +261,11 @@ export class OrdersService {
         // can resubmit a corrected TrxID.
         status: dto.verification === 'VERIFIED' ? 'CONFIRMED' : order.status,
       },
-      include: { buyer: { select: SAFE_BUYER_SELECT }, organization: true },
+      include: {
+        buyer: { select: SAFE_BUYER_SELECT },
+        organization: true,
+        items: { include: { product: true, variant: true } },
+      },
     });
 
     await this.notifications.notifyOrderStatusChanged(updated);
