@@ -80,11 +80,79 @@ export class ProductsService {
     });
   }
 
-  update(id: string, dto: UpdateProductDto) {
-    return this.prisma.product.update({
-      where: { id },
-      data: dto,
-      include: PRODUCT_INCLUDE,
+  // Images: simple replace-all (delete old rows, create new ones) - safe
+  // because ProductImage has no foreign keys pointing at it from Order/
+  // OrderItem, so deleting old image rows can't orphan order history.
+  //
+  // Variants: NOT delete-and-recreate, because OrderItem.variantId
+  // references ProductVariant - destroying a variant that's already on
+  // a past order would corrupt that order's history. Instead, variants
+  // are upserted by id when the edit form sends one back (existing
+  // variant being edited) and created fresh when it has no id (new
+  // variant added during this edit). Any existing variant NOT present
+  // in the incoming list is soft-disabled (isActive: false) rather than
+  // deleted, so old orders can still resolve it.
+  async update(id: string, dto: UpdateProductDto) {
+    const { images, variants, ...rest } = dto;
+
+    return this.prisma.$transaction(async (tx) => {
+      if (images) {
+        await tx.productImage.deleteMany({ where: { productId: id } });
+        if (images.length) {
+          await tx.productImage.createMany({
+            data: images.map((img, i) => ({ productId: id, url: img.url, sortOrder: i })),
+          });
+        }
+      }
+
+      if (variants) {
+        const existing = await tx.productVariant.findMany({ where: { productId: id } });
+        const incomingIds = new Set(
+          variants.filter((v) => v.id).map((v) => v.id as string),
+        );
+
+        // Disable any existing variant the vendor removed from the form,
+        // rather than deleting it (preserves past order references).
+        for (const old of existing) {
+          if (!incomingIds.has(old.id)) {
+            await tx.productVariant.update({
+              where: { id: old.id },
+              data: { isActive: false },
+            });
+          }
+        }
+
+        for (const v of variants) {
+          if (v.id) {
+            await tx.productVariant.update({
+              where: { id: v.id },
+              data: {
+                sku: v.sku,
+                optionValues: v.optionValues,
+                priceOverride: v.priceOverride,
+                stockCount: v.stockCount,
+                isActive: true,
+              },
+            });
+          } else {
+            await tx.productVariant.create({
+              data: {
+                productId: id,
+                sku: v.sku,
+                optionValues: v.optionValues,
+                priceOverride: v.priceOverride,
+                stockCount: v.stockCount,
+              },
+            });
+          }
+        }
+      }
+
+      return tx.product.update({
+        where: { id },
+        data: rest,
+        include: PRODUCT_INCLUDE,
+      });
     });
   }
 

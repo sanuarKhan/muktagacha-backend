@@ -15,6 +15,12 @@ export class ProductImageDto {
 }
 
 export class ProductVariantDto {
+  // Present only when editing an existing variant; absent when the
+  // vendor is adding a brand-new variant during an edit.
+  @IsOptional()
+  @IsString()
+  id?: string;
+
   @IsOptional()
   @IsString()
   sku?: string;
@@ -86,4 +92,25 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hasVariants?: boolean;
+
+  // When provided, REPLACES every existing image for this product -
+  // simplest correct semantics for an edit form that shows "here are
+  // your current photos, add/remove, save" rather than a diff/patch API.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductImageDto)
+  images?: ProductImageDto[];
+
+  // Same replace-all semantics as images - the edit form shows the
+  // current variant list and the vendor edits it directly.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductVariantDto)
+  variants?: ProductVariantDto[];
 }
