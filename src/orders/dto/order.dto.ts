@@ -21,9 +21,6 @@ class OrderItemDto {
   @IsInt()
   @Min(1)
   quantity: number;
-
-  @IsNumber()
-  price: number;
 }
 
 export class CreateOrderDto {

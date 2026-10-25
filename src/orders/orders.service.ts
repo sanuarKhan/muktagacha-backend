@@ -24,31 +24,113 @@ export class OrdersService {
     private notifications: NotificationsService,
   ) {}
 
+  // Price comes from the server's own Product/ProductVariant record, NEVER
+  // from the client - an earlier version trusted a client-submitted price,
+  // which let any buyer set their own price for anything. Stock is
+  // validated and decremented inside a single transaction so two buyers
+  // racing for the last unit can't both succeed (the update's WHERE
+  // clause only matches if enough stock remains at the moment of write).
   async create(buyerId: string, dto: CreateOrderDto) {
-    const order = await this.prisma.order.create({
-      data: {
-        buyerId,
-        organizationId: dto.organizationId,
-        paymentMethod: dto.paymentMethod,
-        status: 'PENDING',
-        // Manual-MFS orders need a TrxID before the vendor will confirm
-        // them; cash orders have nothing to verify.
-        paymentVerification:
-          dto.paymentMethod === 'CASH_ON_DELIVERY' ? 'NOT_SUBMITTED' : 'PENDING_VERIFICATION',
-        items: {
-          create: dto.items.map((item) => ({
-            productId: item.productId,
-            variantId: item.variantId,
-            quantity: item.quantity,
-            price: item.price,
-          })),
+    const order = await this.prisma.$transaction(async (tx) => {
+      const itemsWithPrice: {
+        productId: string;
+        variantId?: string;
+        quantity: number;
+        price: number;
+      }[] = [];
+
+      for (const item of dto.items) {
+        const product = await tx.product.findUnique({
+          where: { id: item.productId },
+          include: { variants: true },
+        });
+        if (!product || !product.isActive) {
+          throw new BadRequestException(`Product ${item.productId} is not available`);
+        }
+        if (product.organizationId !== dto.organizationId) {
+          throw new BadRequestException(
+            'All items in one order must belong to the same shop',
+          );
+        }
+
+        let price: number;
+        if (product.hasVariants) {
+          if (!item.variantId) {
+            throw new BadRequestException(
+              `${product.name} requires choosing a variant (size/color)`,
+            );
+          }
+          const variant = product.variants.find((v) => v.id === item.variantId);
+          if (!variant || !variant.isActive) {
+            throw new BadRequestException('That variant is not available');
+          }
+          if (variant.stockCount < item.quantity) {
+            throw new BadRequestException(
+              `Only ${variant.stockCount} left in stock for ${product.name}`,
+            );
+          }
+          price = variant.priceOverride
+            ? Number(variant.priceOverride)
+            : Number(product.basePrice);
+
+          const result = await tx.productVariant.updateMany({
+            where: { id: variant.id, stockCount: { gte: item.quantity } },
+            data: { stockCount: { decrement: item.quantity } },
+          });
+          if (result.count === 0) {
+            throw new BadRequestException(
+              `${product.name} just sold out - someone else bought the last one`,
+            );
+          }
+        } else {
+          price = Number(product.basePrice);
+        }
+
+        itemsWithPrice.push({
+          productId: item.productId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          price,
+        });
+      }
+
+      return tx.order.create({
+        data: {
+          buyerId,
+          organizationId: dto.organizationId,
+          paymentMethod: dto.paymentMethod,
+          status: 'PENDING',
+          // Manual-MFS orders need a TrxID before the vendor will confirm
+          // them; cash orders have nothing to verify.
+          paymentVerification:
+            dto.paymentMethod === 'CASH_ON_DELIVERY'
+              ? 'NOT_SUBMITTED'
+              : 'PENDING_VERIFICATION',
+          items: { create: itemsWithPrice },
         },
-      },
-      include: { items: true, buyer: { select: SAFE_BUYER_SELECT }, organization: true },
+        include: { items: true, buyer: { select: SAFE_BUYER_SELECT }, organization: true },
+      });
     });
 
     await this.notifications.notifyOrderCreated(order);
     return order;
+  }
+
+  // Restores stock for a cancelled order - mirrors the decrement in
+  // create() so cancelling a confirmed-but-not-yet-shipped order doesn't
+  // permanently lose that stock to a sale that never actually happened.
+  private async restoreStock(orderId: string) {
+    const items = await this.prisma.orderItem.findMany({
+      where: { orderId, variantId: { not: null } },
+    });
+    for (const item of items) {
+      if (item.variantId) {
+        await this.prisma.productVariant.update({
+          where: { id: item.variantId },
+          data: { stockCount: { increment: item.quantity } },
+        });
+      }
+    }
   }
 
   findMine(buyerId: string) {
@@ -113,6 +195,12 @@ export class OrdersService {
       data: { status: dto.status },
       include: { buyer: { select: SAFE_BUYER_SELECT }, organization: true },
     });
+
+    // Cancelling an order that had stock reserved gives it back - a
+    // cancelled sale shouldn't permanently reduce the shop's inventory.
+    if (dto.status === 'CANCELLED' && order.status !== 'CANCELLED') {
+      await this.restoreStock(orderId);
+    }
 
     await this.notifications.notifyOrderStatusChanged(updated);
     return updated;
