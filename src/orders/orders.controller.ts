@@ -37,6 +37,14 @@ export class OrdersController {
     return this.ordersService.findByOrganization(organizationId);
   }
 
+  // Single order detail (for the invoice/receipt page). Declared after
+  // the more specific GET routes above so NestJS doesn't treat "mine"
+  // or "organization" as an :id value.
+  @Get(':id')
+  findOne(@Req() req: any, @Param('id') id: string) {
+    return this.ordersService.findOne(id, req.user.userId, req.user.role);
+  }
+
   @Patch(':id/status')
   updateStatus(
     @Req() req: any,

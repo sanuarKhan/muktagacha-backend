@@ -70,6 +70,28 @@ export class OrdersService {
     });
   }
 
+  // Single order detail, with everything an invoice/receipt needs. Only
+  // the buyer who placed it, the vendor who owns it, or an admin can
+  // view it - an order is private, not a public resource.
+  async findOne(orderId: string, userId: string, role: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: { include: { product: true, variant: true } },
+        buyer: { select: SAFE_BUYER_SELECT },
+        organization: true,
+        rider: { select: { fullName: true, phone: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    const isBuyer = order.buyerId === userId;
+    const isVendorOwner = order.organization.ownerUserId === userId;
+    if (role !== 'ADMIN' && !isBuyer && !isVendorOwner) {
+      throw new ForbiddenException("This isn't your order");
+    }
+    return order;
+  }
+
   async updateStatus(
     orderId: string,
     userId: string,
