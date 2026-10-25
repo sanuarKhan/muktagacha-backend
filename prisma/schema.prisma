@@ -99,6 +99,8 @@ model Organization {
 
   listings  Product[]
   orders    Order[]
+  marketingContacts  MarketingContact[]
+  marketingCampaigns MarketingCampaign[]
 
   @@index([ownerUserId])
   @@index([area, ward, vertical])
@@ -221,4 +223,47 @@ model OrderItem {
 
   @@index([orderId])
   @@map("order_items")
+}
+
+enum CampaignStatus {
+  DRAFT
+  SENDING
+  SENT
+  FAILED
+}
+
+// A vendor's own uploaded customer phone list for SMS marketing.
+// Deliberately scoped per-organization (not shared across vendors) —
+// each shop owns and manages its own contact list, same as the
+// bKash/Nagad numbers pattern.
+model MarketingContact {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  phone          String
+  name           String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, phone])
+  @@index([organizationId])
+  @@map("marketing_contacts")
+}
+
+// One SMS blast sent to some/all of a vendor's contact list. Tracks
+// delivery counts so the vendor sees real results (not a fire-and-forget
+// black box) — sentCount/failedCount are updated as the send completes.
+model MarketingCampaign {
+  id             String         @id @default(uuid())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  message        String         @db.Text
+  status         CampaignStatus @default(DRAFT)
+  recipientCount Int            @default(0)
+  sentCount      Int            @default(0)
+  failedCount    Int            @default(0)
+  createdAt      DateTime       @default(now())
+  sentAt         DateTime?
+
+  @@index([organizationId])
+  @@map("marketing_campaigns")
 }

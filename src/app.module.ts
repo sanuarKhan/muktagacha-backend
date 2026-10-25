@@ -13,6 +13,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { CryptoModule } from './crypto/crypto.module.js';
 import { CloudinaryModule } from './cloudinary/cloudinary.module.js';
+import { MarketingModule } from './marketing/marketing.module.js';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module.js';
     PrismaModule,
     AdminModule,
     CloudinaryModule,
+    MarketingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

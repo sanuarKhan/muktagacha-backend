@@ -8,7 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  private async sendSms(to: string, message: string) {
+  async sendSms(to: string, message: string): Promise<boolean> {
     const apiKey = process.env.HTTPSMS_API_KEY;
     const from = process.env.HTTPSMS_FROM;
 
@@ -16,7 +16,7 @@ export class NotificationsService {
       this.logger.warn(
         `SMS not sent (HTTPSMS_API_KEY/HTTPSMS_FROM not configured): to=${to} message="${message}"`,
       );
-      return;
+      return false;
     }
 
     try {
@@ -30,9 +30,12 @@ export class NotificationsService {
       });
       if (!res.ok) {
         this.logger.error(`SMS send failed: ${res.status} ${await res.text()}`);
+        return false;
       }
+      return true;
     } catch (err) {
       this.logger.error(`SMS send error: ${(err as Error).message}`);
+      return false;
     }
   }
 
