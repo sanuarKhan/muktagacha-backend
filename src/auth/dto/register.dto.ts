@@ -12,8 +12,8 @@ export class RegisterDto {
   fullName: string;
 
   @IsOptional()
-  @IsIn(['BUYER', 'VENDOR', 'PROVIDER'])
-  role?: 'BUYER' | 'VENDOR' | 'PROVIDER';
+  @IsIn(['BUYER', 'VENDOR', 'PROVIDER', 'RIDER'])
+  role?: 'BUYER' | 'VENDOR' | 'PROVIDER' | 'RIDER';
 
   @IsOptional()
   @IsString()

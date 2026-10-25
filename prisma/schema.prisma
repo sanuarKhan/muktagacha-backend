@@ -11,6 +11,7 @@ enum UserRole {
   VENDOR
   PROVIDER
   ADMIN
+  RIDER
 }
 
 enum Vertical {
@@ -63,6 +64,8 @@ model User {
 
   organizations Organization[]
   orders        Order[]
+  deliveriesAsRider Order[] @relation("RiderDeliveries")
+  riderProfile  RiderProfile?
 
   @@index([area, ward])
   @@map("users")
@@ -203,10 +206,21 @@ model Order {
   paymentVerification   PaymentVerificationStatus @default(NOT_SUBMITTED)
   paymentVerifiedAt     DateTime?
 
+  // Local delivery assignment. Muktagacha has no national courier API -
+  // riders are real people the admin/vendor hires directly, assigned
+  // per-order. riderId is nullable: most orders start unassigned, admin
+  // or vendor assigns a rider once the order is confirmed and ready to
+  // go out. deliveredAt is set when the rider marks the order COMPLETED.
+  riderId      String?
+  rider        User?     @relation("RiderDeliveries", fields: [riderId], references: [id])
+  deliveryNote String?   @db.Text
+  deliveredAt  DateTime?
+
   items OrderItem[]
 
   @@index([buyerId])
   @@index([organizationId, status])
+  @@index([riderId, status])
   @@map("orders")
 }
 
@@ -266,4 +280,43 @@ model MarketingCampaign {
 
   @@index([organizationId])
   @@map("marketing_campaigns")
+}
+
+// A rider's public profile: self-signup (same pattern as vendors), admin
+// approves before they can receive deliveries. vehicleType/coverage are
+// shown to admin/vendors when deciding whether to assign a delivery.
+// avgRating/completedDeliveries are denormalized counters, updated each
+// time a new DeliveryRating is created - cheap reads on every order-
+// assignment screen instead of an aggregate query every time.
+model RiderProfile {
+  id                  String         @id @default(uuid())
+  userId              String         @unique
+  user                User           @relation(fields: [userId], references: [id])
+  vehicleType         String?        // e.g. "Bicycle", "Motorcycle", "On foot"
+  coverageArea        String?        // e.g. "Muktagacha Bazar, Ward 1-3"
+  approvalStatus      ApprovalStatus @default(PENDING)
+  avgRating           Decimal?       @db.Decimal(3, 2)
+  completedDeliveries Int            @default(0)
+  createdAt           DateTime       @default(now())
+
+  ratings DeliveryRating[]
+
+  @@index([approvalStatus])
+  @@map("rider_profiles")
+}
+
+// One rating per completed delivery, left by the buyer. Average is
+// recomputed onto RiderProfile.avgRating whenever a new one comes in -
+// same denormalization reasoning as above.
+model DeliveryRating {
+  id        String       @id @default(uuid())
+  riderId   String
+  rider     RiderProfile @relation(fields: [riderId], references: [id])
+  orderId   String       @unique
+  rating    Int          // 1-5
+  comment   String?      @db.Text
+  createdAt DateTime     @default(now())
+
+  @@index([riderId])
+  @@map("delivery_ratings")
 }

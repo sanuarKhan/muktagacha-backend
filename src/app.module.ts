@@ -14,6 +14,7 @@ import { AdminModule } from './admin/admin.module.js';
 import { CryptoModule } from './crypto/crypto.module.js';
 import { CloudinaryModule } from './cloudinary/cloudinary.module.js';
 import { MarketingModule } from './marketing/marketing.module.js';
+import { RidersModule } from './riders/riders.module.js';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MarketingModule } from './marketing/marketing.module.js';
     AdminModule,
     CloudinaryModule,
     MarketingModule,
+    RidersModule,
   ],
   controllers: [AppController],
   providers: [AppService],
