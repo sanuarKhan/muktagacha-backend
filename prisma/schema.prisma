@@ -66,6 +66,14 @@ enum PaymentVerificationStatus {
   REJECTED
 }
 
+enum PrescriptionStatus {
+  NOT_REQUIRED
+  PENDING_UPLOAD
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
 model User {
   id           String   @id @default(uuid())
   phone        String   @unique
@@ -97,6 +105,8 @@ model User {
   ordersReceivedAsGift   Order[]              @relation("OrdersReceivedAsGift")
   organizationsVerified  Organization[]       @relation("OrganizationsVerifiedBy")
   fraudFlagsReviewed     FraudFlag[]          @relation("FraudFlagsReviewed")
+  prescriptionsReviewed  Order[]              @relation("PrescriptionsReviewed")
+  serviceRequestsAsBuyer ServiceRequest[]     @relation("ServiceRequestsAsBuyer")
 
   @@index([area, ward])
   @@map("users")
@@ -168,6 +178,7 @@ model Organization {
   marketingCampaigns MarketingCampaign[]
   conversations      Conversation[]
   shopQuestions      ShopQuestion[]
+  serviceRequests    ServiceRequest[]
 
   @@index([ownerUserId])
   @@index([area, ward, vertical])
@@ -189,6 +200,7 @@ model Category {
   isActive  Boolean    @default(true)
 
   products  Product[]
+  serviceRequests ServiceRequest[]
 
   @@index([vertical, parentId])
   @@map("categories")
@@ -206,6 +218,13 @@ model Product {
   description    String?       @db.Text
   basePrice      Decimal       @db.Decimal(10, 2)
   hasVariants    Boolean       @default(false)
+
+  // Pharmacy vertical: a vendor marks a specific medicine as requiring a
+  // prescription (e.g. antibiotics) - not every pharmacy item needs one
+  // (hand sanitizer, vitamins). Meaningless/ignored for MARKETPLACE and
+  // SERVICES products. If ANY item in a cart requires one, the whole
+  // order needs a prescription photo before it can be placed.
+  requiresPrescription Boolean @default(false)
 
   images         ProductImage[]
   variants       ProductVariant[]
@@ -280,6 +299,20 @@ model Order {
   // doesn't apply here), but also useful generally for any order where a
   // map pin alone isn't precise enough (building/floor/landmark notes).
   deliveryAddressText String? @db.Text
+
+  // Pharmacy vertical: set when ANY item in the order has
+  // Product.requiresPrescription = true. Buyer must upload a photo of a
+  // real prescription before the pharmacy will confirm the order -
+  // mirrors the existing manual-payment-verification pattern (buyer
+  // submits proof, vendor/admin reviews and approves/rejects) rather than
+  // inventing a new review mechanism.
+  requiresPrescription   Boolean               @default(false)
+  prescriptionImageUrl   String?               @db.Text
+  prescriptionStatus     PrescriptionStatus    @default(NOT_REQUIRED)
+  prescriptionReviewedAt DateTime?
+  prescriptionReviewedById String?
+  prescriptionReviewedBy  User?               @relation("PrescriptionsReviewed", fields: [prescriptionReviewedById], references: [id])
+  prescriptionRejectionNote String?            @db.Text
 
   // Buyer-submitted proof of payment for BKASH/NAGAD orders (irrelevant
   // for CASH_ON_DELIVERY, which stays NOT_SUBMITTED/unused).
@@ -699,4 +732,77 @@ model ReplyVote {
   @@unique([replyId, userId])
   @@index([replyId])
   @@map("reply_votes")
+}
+
+// =============================================================================
+// SERVICES VERTICAL — request/quote booking flow
+// =============================================================================
+// Deliberately NOT the same cart-and-checkout flow as Marketplace/Pharmacy.
+// A buyer can't add "AC repair" to a cart at a fixed price the way they add
+// a shirt - the real-world flow (matching Sheba.xyz, the validated local
+// reference model named in the original plan) is: buyer describes the
+// problem -> provider reviews and sends a price quote -> buyer accepts ->
+// provider visits and does the work -> both sides confirm completion.
+// Payment happens the same way as everything else in Phase 1 (cash or the
+// vendor's own bKash/Nagad number), just AFTER the work, not upfront.
+
+enum ServiceRequestStatus {
+  REQUESTED // buyer submitted, waiting on provider to quote
+  QUOTED // provider sent a price, waiting on buyer to accept/decline
+  ACCEPTED // buyer accepted the quote, provider should come do the work
+  IN_PROGRESS // provider marked they've started/arrived
+  COMPLETED // work done, both sides agree
+  DECLINED // provider declined to take this job
+  CANCELLED // buyer cancelled before acceptance
+}
+
+model ServiceRequest {
+  id             String               @id @default(uuid())
+  buyerId        String
+  buyer          User                 @relation("ServiceRequestsAsBuyer", fields: [buyerId], references: [id])
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  categoryId     String?
+  category       Category?            @relation(fields: [categoryId], references: [id])
+
+  // What the buyer actually needs done, in their own words - services
+  // have no fixed catalog of exact tasks the way products do (every AC
+  // repair job is a little different), so this is the core of the request.
+  description String @db.Text
+  photoUrl    String? @db.Text // optional photo of the problem (e.g. a leaking pipe)
+
+  // Where the work needs to happen - a service visit needs an address,
+  // not a delivery drop-off point (though the same lat/lng pin pattern
+  // works for "find me" convenience).
+  addressText String? @db.Text
+  latitude    Decimal? @db.Decimal(10, 7)
+  longitude   Decimal? @db.Decimal(10, 7)
+
+  // Buyer's preferred time window - free text ("tomorrow morning",
+  // "this weekend") rather than a rigid calendar slot system, matching
+  // the plan's explicit sequencing (real calendar-based slot scheduling
+  // is Phase 1.5, not Phase 1 - see plan Section 3.2).
+  preferredTime String?
+
+  status ServiceRequestStatus @default(REQUESTED)
+
+  // Provider's quote - set when status moves to QUOTED. Nullable until
+  // then since the buyer doesn't know the price when they first describe
+  // the problem (the whole point of a quote-based flow).
+  quotedPrice   Decimal? @db.Decimal(10, 2)
+  quoteNote     String?  @db.Text
+  quotedAt      DateTime?
+
+  paymentMethod PaymentMethod?
+  paymentVerification   PaymentVerificationStatus @default(NOT_SUBMITTED)
+  paymentTrxId          String?
+  paymentVerifiedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  completedAt DateTime?
+
+  @@index([buyerId])
+  @@index([organizationId, status])
+  @@map("service_requests")
 }

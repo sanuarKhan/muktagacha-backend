@@ -16,6 +16,7 @@ import { CloudinaryModule } from './cloudinary/cloudinary.module.js';
 import { MarketingModule } from './marketing/marketing.module.js';
 import { RidersModule } from './riders/riders.module.js';
 import { ChatModule } from './chat/chat.module.js';
+import { ServiceRequestsModule } from './service-requests/service-requests.module.js';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ChatModule } from './chat/chat.module.js';
     MarketingModule,
     RidersModule,
     ChatModule,
+    ServiceRequestsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

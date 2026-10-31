@@ -59,6 +59,13 @@ export class CreateProductDto {
   @IsBoolean()
   hasVariants?: boolean;
 
+  // Pharmacy vertical only - marks this medicine as needing a buyer-
+  // uploaded prescription before the order can proceed. Ignored/false for
+  // Marketplace and Services vendors.
+  @IsOptional()
+  @IsBoolean()
+  requiresPrescription?: boolean;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -96,6 +103,10 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   hasVariants?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requiresPrescription?: boolean;
 
   // When provided, REPLACES every existing image for this product -
   // simplest correct semantics for an edit form that shows "here are

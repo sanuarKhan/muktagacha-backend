@@ -107,4 +107,33 @@ export class OrdersController {
   checkSkodePayStatus(@Req() req: any, @Param('id') id: string) {
     return this.ordersService.checkSkodePayStatus(id, req.user.userId);
   }
+
+  // Pharmacy: buyer uploads a photo of their prescription (already
+  // hosted via the existing Cloudinary signing flow - this just records
+  // the resulting URL against the order).
+  @Post(':id/prescription')
+  submitPrescription(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { imageUrl: string },
+  ) {
+    return this.ordersService.submitPrescription(id, req.user.userId, body.imageUrl);
+  }
+
+  // Pharmacy: vendor (or admin) approves or rejects the uploaded
+  // prescription photo.
+  @Patch(':id/prescription-review')
+  reviewPrescription(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { decision: 'APPROVED' | 'REJECTED'; note?: string },
+  ) {
+    return this.ordersService.reviewPrescription(
+      id,
+      req.user.userId,
+      req.user.role,
+      body.decision,
+      body.note,
+    );
+  }
 }

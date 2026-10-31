@@ -24,6 +24,7 @@ export class ProductsService {
         description: dto.description,
         basePrice: dto.basePrice,
         hasVariants: dto.hasVariants ?? false,
+        requiresPrescription: dto.requiresPrescription ?? false,
         images: dto.images?.length
           ? {
               create: dto.images.map((img, i) => ({

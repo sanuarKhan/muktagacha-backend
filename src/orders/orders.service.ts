@@ -55,6 +55,7 @@ export class OrdersService {
         quantity: number;
         price: number;
       }[] = [];
+      let requiresPrescription = false;
 
       for (const item of dto.items) {
         const product = await tx.product.findUnique({
@@ -68,6 +69,9 @@ export class OrdersService {
           throw new BadRequestException(
             'All items in one order must belong to the same shop',
           );
+        }
+        if (product.requiresPrescription) {
+          requiresPrescription = true;
         }
 
         let price: number;
@@ -124,6 +128,8 @@ export class OrdersService {
           recipientId: dto.isGift ? dto.recipientId : undefined,
           giftMessage: dto.isGift ? dto.giftMessage : undefined,
           giftSenderAnonymous: dto.isGift ? !!dto.giftSenderAnonymous : false,
+          requiresPrescription,
+          prescriptionStatus: requiresPrescription ? 'PENDING_UPLOAD' : 'NOT_REQUIRED',
           // Manual-MFS orders need a TrxID before the vendor will confirm
           // them; cash orders have nothing to verify.
           paymentVerification:
@@ -351,6 +357,23 @@ export class OrdersService {
       throw new ForbiddenException('Not your organization order');
     }
 
+    // Pharmacy safety gate: a prescription-required order can't be
+    // confirmed/progressed until the vendor has actually approved the
+    // uploaded prescription - prevents a vendor accidentally (or a buyer
+    // pressuring them to) skip the one real safety check this vertical
+    // needs. CANCELLED is always allowed regardless (a buyer backing out
+    // shouldn't be blocked by an unresolved prescription).
+    if (
+      order.requiresPrescription &&
+      order.prescriptionStatus !== 'APPROVED' &&
+      dto.status !== 'CANCELLED' &&
+      dto.status !== 'PENDING'
+    ) {
+      throw new BadRequestException(
+        'This order needs an approved prescription before it can move forward',
+      );
+    }
+
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: dto.status },
@@ -436,5 +459,61 @@ export class OrdersService {
 
     await this.notifications.notifyOrderStatusChanged(updated);
     return updated;
+  }
+
+  // ───────────────────────── Pharmacy: prescription upload/review ─────────────────────────
+  // Same two-step pattern as payment verification: buyer submits proof
+  // (here, a photo instead of a TrxID), vendor/admin reviews and
+  // approves/rejects. Only meaningful when requiresPrescription is true.
+  async submitPrescription(orderId: string, buyerId: string, imageUrl: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.buyerId !== buyerId) {
+      throw new ForbiddenException('Not your order');
+    }
+    if (!order.requiresPrescription) {
+      throw new BadRequestException('This order does not need a prescription');
+    }
+    return this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        prescriptionImageUrl: imageUrl,
+        prescriptionStatus: 'PENDING_REVIEW',
+        prescriptionRejectionNote: null,
+      },
+    });
+  }
+
+  // Vendor (or admin) reviews the uploaded prescription photo. Rejecting
+  // resets it to PENDING_UPLOAD so the buyer can submit a clearer/correct
+  // one instead of being stuck - mirrors how a rejected payment TrxID
+  // still lets the buyer resubmit.
+  async reviewPrescription(
+    orderId: string,
+    userId: string,
+    role: string,
+    decision: 'APPROVED' | 'REJECTED',
+    note?: string,
+  ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { organization: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (role !== 'ADMIN' && order.organization.ownerUserId !== userId) {
+      throw new ForbiddenException('Not your organization order');
+    }
+    if (order.prescriptionStatus !== 'PENDING_REVIEW') {
+      throw new BadRequestException('No prescription is currently waiting for review on this order');
+    }
+    return this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        prescriptionStatus: decision === 'APPROVED' ? 'APPROVED' : 'PENDING_UPLOAD',
+        prescriptionReviewedAt: new Date(),
+        prescriptionReviewedById: userId,
+        prescriptionRejectionNote: decision === 'REJECTED' ? note : null,
+      },
+    });
   }
 }
