@@ -94,11 +94,6 @@ heavy usage:**
   reporting) — same reasoning: fine for a small early user base, a real gap
   once the shop list grows.
 
-None of the above block the MVP from working correctly for its actual first
-users — they're the deliberate "smallest version that's honestly useful"
-cuts, listed here so they're a visible backlog, not a silent gap discovered
-later.
-
 ## 7. Answer voting + customer-to-customer messenger
 
 - **Reddit-style voting**: each Q&A answer has a live net score (upvotes
@@ -111,7 +106,7 @@ later.
 - No new infrastructure or cost for either — reuses the same Postgres
   tables and Socket.IO gateway as the rest of the chat system.
 
-## 8. Anonymous posting + gift orders (added after client follow-up)
+## 8. Anonymous posting + gift orders
 
 - **Anonymous posting**: Q&A questions/answers and community posts can be
   marked anonymous by the author at posting time. Real identity is always
@@ -130,3 +125,40 @@ later.
   phone, the gift notification simply won't reach them (same limitation
   as the rest of the SMS system, not new to gifting).
 - No new infrastructure or cost for either feature.
+
+## 9. Chat privacy (name masking) + maps directions fix
+
+- Private 1:1 chats (buyer<->vendor and the customer<->customer
+  messenger) now mask display names - first and last letter shown,
+  everything between replaced with asterisks (e.g. "Karim Ahmed" ->
+  "K*********d"). Phone numbers were never exposed in chat to begin with.
+  Masking happens server-side, not just hidden in the UI.
+- "Get directions" links now point to Google Maps' keyless
+  destination-only URL instead of the full openstreetmap.org website -
+  the embedded maps (shop location, delivery pin) always used free,
+  keyless OpenStreetMap tiles; only the external directions LINK was
+  routing through openstreetmap.org's page chrome, which has login/signup
+  buttons that looked like a forced account requirement even though none
+  was actually needed.
+
+## 10. Vendor trust verification + fraud detection
+
+- **Vendor verification**: a vendor can upload a trade license and/or NID
+  photo to earn a public "Verified" badge - at least one document is
+  mandatory, both accepted for a stronger review. Separate from the
+  existing approvalStatus (a shop can be live and selling while still
+  Unverified - verification is opt-in trust-building, not a launch gate).
+  Admin reviews submissions in a dedicated queue and approves/rejects.
+- **Fraud detection**: rule-based, admin-review-only - NEVER auto-blocks
+  an order. Four rules: rapid repeat orders to the same vendor, high
+  Cash-on-Delivery cancellation rate, a payment transaction ID reused
+  across orders, and a brand-new account placing an unusually large
+  order. Every flag lands in an admin review queue; the order itself is
+  never held, delayed, or cancelled automatically - a human always makes
+  the final call.
+- Known gap: the ৳3,000 "high value" threshold and the 3-strikes/15-minute
+  rapid-order window are reasonable starting guesses, not tuned against
+  real Muktagacha order data (there isn't enough yet) - worth revisiting
+  once real order volume exists.
+- No new infrastructure or cost - reuses existing Cloudinary uploads and
+  Postgres.
