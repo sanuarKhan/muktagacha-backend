@@ -98,3 +98,20 @@ None of the above block the MVP from working correctly for its actual first
 users — they're the deliberate "smallest version that's honestly useful"
 cuts, listed here so they're a visible backlog, not a silent gap discovered
 later.
+
+## 7. Answer voting + customer-to-customer messenger (added after client follow-up)
+
+- **Reddit-style voting**: each Q&A answer now has a live net score
+  (upvotes minus downvotes); answers sort best-score-first instead of
+  oldest-first. This is the actual mechanism requested — not a simple
+  "helpful" counter — matching how Reddit surfaces its best answer.
+- **Customer-to-customer messenger**: buyers can now message each other
+  directly (not just a shop), discoverable via a "Message" button on
+  Community posts. Either side can start this freely — unlike the
+  buyer-vendor rule, there's no "only one side can initiate" restriction
+  here, since it's peer discussion, not a sales channel.
+- No new infrastructure or cost for either — reuses the same Postgres
+  tables and Socket.IO gateway as the rest of the chat system.
+- Same shortcuts apply as Section 6 (no pagination, no attachments, no
+  push notifications) — these two features inherit that backlog rather
+  than introducing new gaps.
