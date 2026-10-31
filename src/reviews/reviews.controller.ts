@@ -23,4 +23,10 @@ export class ReviewsController {
   reviewServiceRequest(@Req() req: any, @Param('id') id: string, @Body() dto: CreateShopReviewDto) {
     return this.reviewsService.reviewServiceRequest(id, req.user.userId, dto);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('bookings/:id/review')
+  reviewSlotBooking(@Req() req: any, @Param('id') id: string, @Body() dto: CreateShopReviewDto) {
+    return this.reviewsService.reviewSlotBooking(id, req.user.userId, dto);
+  }
 }

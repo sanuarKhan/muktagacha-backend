@@ -137,7 +137,7 @@ export class AdminController {
   @Roles('ADMIN')
   @Get('escrow')
   async escrowQueue() {
-    const [orders, serviceRequests] = await Promise.all([
+    const [orders, serviceRequests, slotBookings] = await Promise.all([
       this.prisma.order.findMany({
         where: { escrowStatus: 'HELD' },
         include: {
@@ -155,7 +155,15 @@ export class AdminController {
         },
         orderBy: { escrowHeldAt: 'asc' },
       }),
+      this.prisma.slotBooking.findMany({
+        where: { escrowStatus: 'HELD' },
+        include: {
+          student: { select: { id: true, fullName: true, phone: true } },
+          slot: { include: { organization: { select: { id: true, name: true } } } },
+        },
+        orderBy: { escrowHeldAt: 'asc' },
+      }),
     ]);
-    return { orders, serviceRequests };
+    return { orders, serviceRequests, slotBookings };
   }
 }

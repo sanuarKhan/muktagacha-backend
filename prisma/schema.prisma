@@ -18,6 +18,7 @@ enum Vertical {
   MARKETPLACE
   PHARMACY
   SERVICES
+  EDUCATION
 }
 
 enum ApprovalStatus {
@@ -134,6 +135,8 @@ model User {
   walletTopupsReviewed   WalletTopup[]        @relation("WalletTopupsReviewed")
   escrowOrdersReleased   Order[]              @relation("EscrowReleasedByAdmin")
   escrowServiceRequestsReleased ServiceRequest[] @relation("ServiceEscrowReleasedByAdmin")
+  slotBookingsAsStudent SlotBooking[]       @relation("SlotBookingsAsStudent")
+  escrowSlotBookingsReleased SlotBooking[]  @relation("SlotEscrowReleasedByAdmin")
 
   @@index([area, ward])
   @@map("users")
@@ -214,6 +217,7 @@ model Organization {
   shopQuestions      ShopQuestion[]
   serviceRequests    ServiceRequest[]
   shopReviews        ShopReview[]
+  bookingSlots       BookingSlot[]
 
   @@index([ownerUserId])
   @@index([area, ward, vertical])
@@ -236,6 +240,7 @@ model Category {
 
   products  Product[]
   serviceRequests ServiceRequest[]
+  bookingSlots BookingSlot[]
 
   @@index([vertical, parentId])
   @@map("categories")
@@ -890,6 +895,8 @@ model ShopReview {
   order           Order?          @relation(fields: [orderId], references: [id])
   serviceRequestId String?        @unique
   serviceRequest  ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  slotBookingId   String?         @unique
+  slotBooking     SlotBooking?    @relation(fields: [slotBookingId], references: [id])
   rating          Int // 1-5
   comment         String?         @db.Text
   createdAt       DateTime        @default(now())
@@ -981,4 +988,88 @@ model WalletTransaction {
 
   @@index([walletId])
   @@map("wallet_transactions")
+}
+
+// =============================================================================
+// EDUCATION/CONSULTATION SLOT BOOKING (Phase 1.5)
+// =============================================================================
+// Deliberately a THIRD distinct booking shape in this schema, alongside
+// Order (cart/checkout) and ServiceRequest (request-then-quote). Tutoring
+// and consultation need neither: the tutor publishes real calendar time
+// slots in advance, a student picks one and it's booked immediately at a
+// known price - no "add to cart", no "describe your problem and wait for
+// a quote". This is the shape named explicitly in the original plan:
+// "Education and consultation booking, using calendar-based slot
+// scheduling - different enough from simple product ordering to be
+// worth building as its own focused piece of work."
+enum BookingSlotStatus {
+  OPEN // published by the provider, not yet booked
+  BOOKED // a student has booked this exact slot
+  CANCELLED // provider pulled it, or the booking on it was cancelled
+  COMPLETED // the session happened
+}
+
+// A single bookable time window a tutor/consultant has published.
+// Providers create these ahead of time (e.g. "every Monday 6-7pm" is
+// expressed as multiple individual BookingSlot rows, not a recurrence
+// rule - simpler to reason about and query at pilot scale, and trivially
+// supports a provider cancelling or editing just one occurrence).
+model BookingSlot {
+  id             String            @id @default(uuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id])
+  categoryId     String?
+  category       Category?         @relation(fields: [categoryId], references: [id])
+  title          String // e.g. "1-on-1 IELTS Speaking Practice", "Math Tutoring - Class 9"
+  description    String?           @db.Text
+  startAt        DateTime
+  endAt          DateTime
+  price          Decimal           @db.Decimal(10, 2)
+  isOnline       Boolean           @default(true) // online (video call link) vs in-person
+  meetingLink    String? // set by provider once booked, e.g. a Google Meet/Zoom link
+  location       String? // for in-person sessions
+  status         BookingSlotStatus @default(OPEN)
+  createdAt      DateTime          @default(now())
+
+  booking SlotBooking?
+
+  @@index([organizationId, startAt])
+  @@index([status, startAt])
+  @@map("booking_slots")
+}
+
+// A student's booking of one specific slot. One booking per slot
+// (enforced by @@unique on slotId) - the slot moving to BOOKED is what
+// makes it disappear from other students' available-slots list, so
+// there's never a double-booking race in the first place (DB-level
+// unique constraint backs this up).
+model SlotBooking {
+  id         String      @id @default(uuid())
+  slotId     String      @unique
+  slot       BookingSlot @relation(fields: [slotId], references: [id])
+  studentId  String
+  student    User        @relation("SlotBookingsAsStudent", fields: [studentId], references: [id])
+  note       String?     @db.Text // optional message from the student to the tutor
+
+  paymentMethod       PaymentMethod?
+  paymentTrxId        String?
+  paymentVerification PaymentVerificationStatus @default(NOT_SUBMITTED)
+  paymentVerifiedAt   DateTime?
+
+  // Same WALLET-only escrow scheme as Order/ServiceRequest - see the
+  // EscrowStatus enum comment for the full rationale.
+  escrowStatus       EscrowStatus @default(NOT_APPLICABLE)
+  escrowHeldAt       DateTime?
+  escrowReleasedAt   DateTime?
+  escrowReleasedById String?
+  escrowReleasedBy   User?        @relation("SlotEscrowReleasedByAdmin", fields: [escrowReleasedById], references: [id])
+  buyerConfirmedAt   DateTime?
+
+  cancelledAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  shopReview  ShopReview?
+
+  @@index([studentId])
+  @@map("slot_bookings")
 }

@@ -71,6 +71,36 @@ export class ReviewsService {
     return { ok: true };
   }
 
+  // Review a completed SlotBooking (Education/consultation session).
+  async reviewSlotBooking(bookingId: string, buyerId: string, dto: CreateShopReviewDto) {
+    const booking = await this.prisma.slotBooking.findUnique({
+      where: { id: bookingId },
+      include: { slot: true, shopReview: true },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    if (booking.studentId !== buyerId) {
+      throw new ForbiddenException('This is not your booking');
+    }
+    if (booking.slot.status !== 'COMPLETED') {
+      throw new BadRequestException('You can only review a completed booking');
+    }
+    if (booking.shopReview) {
+      throw new BadRequestException('You already reviewed this booking');
+    }
+
+    await this.prisma.shopReview.create({
+      data: {
+        organizationId: booking.slot.organizationId,
+        buyerId,
+        slotBookingId: bookingId,
+        rating: dto.rating,
+        comment: dto.comment,
+      },
+    });
+    await this.recomputeAverage(booking.slot.organizationId);
+    return { ok: true };
+  }
+
   // Public: every review for a shop, newest first, for display on the
   // storefront/shop-info modal.
   findByOrganization(organizationId: string) {

@@ -19,6 +19,7 @@ import { ChatModule } from './chat/chat.module.js';
 import { ServiceRequestsModule } from './service-requests/service-requests.module.js';
 import { ReviewsModule } from './reviews/reviews.module.js';
 import { WalletsModule } from './wallets/wallets.module.js';
+import { BookingsModule } from './bookings/bookings.module.js';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { WalletsModule } from './wallets/wallets.module.js';
     ServiceRequestsModule,
     ReviewsModule,
     WalletsModule,
+    BookingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
