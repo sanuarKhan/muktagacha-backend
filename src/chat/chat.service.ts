@@ -7,12 +7,26 @@ import {
   ReplyQuestionDto,
 } from './dto/chat.dto.js';
 import { ChatGateway } from './chat.gateway.js';
+import { maskName } from './privacy.util.js';
 
 const SAFE_USER_SELECT = {
   id: true,
   fullName: true,
   role: true,
 } as const;
+
+// Privacy inside a private buyer<->vendor conversation: phone numbers are
+// NEVER selected/returned here (SAFE_USER_SELECT has no phone field), and
+// display names are masked (first+last letter, asterisks between) so
+// neither side can identify or contact the other outside the platform
+// just from browsing the chat UI. Applied at the boundary, not left to
+// the frontend, so no client can bypass it by reading the raw response.
+function maskParticipant<T extends { fullName: string } | null | undefined>(
+  user: T,
+): T {
+  if (!user) return user;
+  return { ...user, fullName: maskName(user.fullName) };
+}
 
 const ANONYMOUS_AUTHOR = { id: '', fullName: 'Anonymous', role: 'BUYER' as const };
 
@@ -48,7 +62,7 @@ export class ChatService {
   async listMyConversations(userId: string, role: string) {
     if (role === 'VENDOR') {
       // Vendor sees every conversation across all shops they own.
-      return this.prisma.conversation.findMany({
+      const convos = await this.prisma.conversation.findMany({
         where: { organization: { ownerUserId: userId } },
         include: {
           buyer: { select: SAFE_USER_SELECT },
@@ -57,6 +71,7 @@ export class ChatService {
         },
         orderBy: { updatedAt: 'desc' },
       });
+      return convos.map((c) => ({ ...c, buyer: maskParticipant(c.buyer) }));
     }
     return this.prisma.conversation.findMany({
       where: { buyerId: userId },
@@ -84,11 +99,12 @@ export class ChatService {
 
   async getMessages(conversationId: string, userId: string) {
     await this.assertConversationAccess(conversationId, userId);
-    return this.prisma.message.findMany({
+    const messages = await this.prisma.message.findMany({
       where: { conversationId },
       include: { sender: { select: SAFE_USER_SELECT } },
       orderBy: { createdAt: 'asc' },
     });
+    return messages.map((m) => ({ ...m, sender: maskParticipant(m.sender) }));
   }
 
   // Buyer starts (or continues) a conversation with a shop by sending the
@@ -115,9 +131,10 @@ export class ChatService {
       data: { conversationId: conversation.id, senderId: buyerId, body: dto.body },
       include: { sender: { select: SAFE_USER_SELECT } },
     });
+    const masked = { ...message, sender: maskParticipant(message.sender) };
 
-    this.gateway.emitNewMessage(conversation.id, message);
-    return { conversation, message };
+    this.gateway.emitNewMessage(conversation.id, masked);
+    return { conversation, message: masked };
   }
 
   // Reply inside an EXISTING conversation - works for both sides (buyer
@@ -135,8 +152,9 @@ export class ChatService {
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
-    this.gateway.emitNewMessage(conversationId, message);
-    return message;
+    const masked = { ...message, sender: maskParticipant(message.sender) };
+    this.gateway.emitNewMessage(conversationId, masked);
+    return masked;
   }
 
   async markRead(conversationId: string, userId: string) {

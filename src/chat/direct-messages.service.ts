@@ -2,12 +2,23 @@ import { Injectable, ForbiddenException, NotFoundException, BadRequestException,
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SendDirectMessageDto, StartDirectConversationDto } from './dto/chat.dto.js';
 import { ChatGateway } from './chat.gateway.js';
+import { maskName } from './privacy.util.js';
 
 const SAFE_USER_SELECT = {
   id: true,
   fullName: true,
   role: true,
 } as const;
+
+// Same privacy rule as the buyer<->vendor conversations: phone numbers are
+// never selected, and names are masked so two customers chatting through
+// the platform can't identify each other by full name either.
+function maskParticipant<T extends { fullName: string } | null | undefined>(
+  user: T,
+): T {
+  if (!user) return user;
+  return { ...user, fullName: maskName(user.fullName) };
+}
 
 // Customer <-> customer messaging, like a normal messenger. Unlike the
 // buyer-vendor Conversation model, EITHER side can start this freely - no
@@ -28,15 +39,23 @@ export class DirectMessagesService {
   }
 
   listMyConversations(userId: string) {
-    return this.prisma.directConversation.findMany({
-      where: { OR: [{ userAId: userId }, { userBId: userId }] },
-      include: {
-        userA: { select: SAFE_USER_SELECT },
-        userB: { select: SAFE_USER_SELECT },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
+    return this.prisma.directConversation
+      .findMany({
+        where: { OR: [{ userAId: userId }, { userBId: userId }] },
+        include: {
+          userA: { select: SAFE_USER_SELECT },
+          userB: { select: SAFE_USER_SELECT },
+          messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+        orderBy: { updatedAt: 'desc' },
+      })
+      .then((convos) =>
+        convos.map((c) => ({
+          ...c,
+          userA: maskParticipant(c.userA),
+          userB: maskParticipant(c.userB),
+        })),
+      );
   }
 
   private async assertAccess(conversationId: string, userId: string) {
@@ -50,11 +69,12 @@ export class DirectMessagesService {
 
   async getMessages(conversationId: string, userId: string) {
     await this.assertAccess(conversationId, userId);
-    return this.prisma.directMessage.findMany({
+    const messages = await this.prisma.directMessage.findMany({
       where: { conversationId },
       include: { sender: { select: SAFE_USER_SELECT } },
       orderBy: { createdAt: 'asc' },
     });
+    return messages.map((m) => ({ ...m, sender: maskParticipant(m.sender) }));
   }
 
   async startConversation(userId: string, dto: StartDirectConversationDto) {
@@ -75,9 +95,10 @@ export class DirectMessagesService {
       data: { conversationId: conversation.id, senderId: userId, body: dto.body },
       include: { sender: { select: SAFE_USER_SELECT } },
     });
+    const masked = { ...message, sender: maskParticipant(message.sender) };
 
-    this.gateway.emitNewDirectMessage(conversation.id, message);
-    return { conversation, message };
+    this.gateway.emitNewDirectMessage(conversation.id, masked);
+    return { conversation, message: masked };
   }
 
   async sendMessage(conversationId: string, userId: string, dto: SendDirectMessageDto) {
@@ -90,8 +111,9 @@ export class DirectMessagesService {
       where: { id: conversationId },
       data: { updatedAt: new Date() },
     });
-    this.gateway.emitNewDirectMessage(conversationId, message);
-    return message;
+    const masked = { ...message, sender: maskParticipant(message.sender) };
+    this.gateway.emitNewDirectMessage(conversationId, masked);
+    return masked;
   }
 
   async markRead(conversationId: string, userId: string) {
