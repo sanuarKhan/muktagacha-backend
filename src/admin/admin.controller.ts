@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, UseGuards, Req } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -24,6 +24,8 @@ export class AdminController {
       activeProducts,
       totalOrders,
       pendingPaymentVerifications,
+      unresolvedFraudFlags,
+      pendingVerifications,
     ] = await Promise.all([
       this.prisma.user.count(),
       this.prisma.organization.count(),
@@ -34,6 +36,8 @@ export class AdminController {
       this.prisma.product.count({ where: { isActive: true } }),
       this.prisma.order.count(),
       this.prisma.order.count({ where: { paymentVerification: 'PENDING_VERIFICATION' } }),
+      this.prisma.fraudFlag.count({ where: { resolved: false } }),
+      this.prisma.organization.count({ where: { verificationStatus: 'PENDING_REVIEW' } }),
     ]);
     return {
       totalUsers,
@@ -45,6 +49,8 @@ export class AdminController {
       activeProducts,
       totalOrders,
       pendingPaymentVerifications,
+      unresolvedFraudFlags,
+      pendingVerifications,
     };
   }
 
@@ -72,6 +78,50 @@ export class AdminController {
         buyer: { select: { id: true, fullName: true, phone: true } },
         organization: { select: { id: true, name: true } },
         items: true,
+      },
+    });
+  }
+
+  // Fraud review queue - every automatically-flagged order an admin
+  // hasn't resolved yet. Flags never block an order on their own; this is
+  // purely the human-review surface where an admin decides what to do.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Get('fraud-flags')
+  async fraudFlags() {
+    return this.prisma.fraudFlag.findMany({
+      where: { resolved: false },
+      include: {
+        order: {
+          include: {
+            buyer: { select: { id: true, fullName: true, phone: true, createdAt: true } },
+            organization: { select: { id: true, name: true } },
+            items: true,
+          },
+        },
+      },
+      orderBy: [{ severity: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  // Admin dismisses or acts on a flag - marks it resolved with an
+  // optional note explaining what was done (e.g. "contacted buyer,
+  // confirmed legitimate" or "cancelled order, buyer warned").
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch('fraud-flags/:id/resolve')
+  async resolveFraudFlag(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { note?: string },
+  ) {
+    return this.prisma.fraudFlag.update({
+      where: { id },
+      data: {
+        resolved: true,
+        resolvedAt: new Date(),
+        resolvedById: req.user.userId,
+        resolutionNote: body.note,
       },
     });
   }

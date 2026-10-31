@@ -26,6 +26,20 @@ enum ApprovalStatus {
   REJECTED
 }
 
+// Separate from ApprovalStatus (which just gates "can this shop go live
+// at all") - verification is an OPTIONAL extra trust signal a vendor can
+// earn by proving who they really are, shown to buyers as a badge. A shop
+// can be APPROVED (live, selling) but still UNVERIFIED if the owner never
+// submitted ID/license docs - this is deliberate, not a bug: verification
+// is opt-in trust-building, not a launch gate, matching the client's
+// "they will remain unverified" framing rather than being blocked.
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
+}
+
 enum OrderStatus {
   PENDING
   CONFIRMED
@@ -81,6 +95,8 @@ model User {
   directMessagesSent     DirectMessage[]      @relation("DirectMessagesSent")
   replyVotesCast         ReplyVote[]          @relation("ReplyVotesCast")
   ordersReceivedAsGift   Order[]              @relation("OrdersReceivedAsGift")
+  organizationsVerified  Organization[]       @relation("OrganizationsVerifiedBy")
+  fraudFlagsReviewed     FraudFlag[]          @relation("FraudFlagsReviewed")
 
   @@index([area, ward])
   @@map("users")
@@ -98,6 +114,20 @@ model Organization {
   deliveryRadiusKm  Decimal?       @db.Decimal(4, 1)
   approvalStatus    ApprovalStatus @default(PENDING)
   createdAt         DateTime       @default(now())
+
+  // Vendor trust verification - OPTIONAL, separate from approvalStatus.
+  // Vendor uploads at least one of tradeLicenseUrl/nidUrl (both allowed,
+  // at least one mandatory to move past UNVERIFIED), admin reviews and
+  // approves/rejects. VERIFIED shops get a visible badge on their
+  // storefront so buyers always know who they're really buying from -
+  // the core trust requirement for a community-based marketplace.
+  verificationStatus  VerificationStatus @default(UNVERIFIED)
+  tradeLicenseUrl     String?            @db.Text
+  nidUrl              String?            @db.Text
+  verificationNote    String?            @db.Text
+  verifiedAt          DateTime?
+  verifiedById        String?
+  verifiedBy          User?              @relation("OrganizationsVerifiedBy", fields: [verifiedById], references: [id])
 
   // Shop's physical location, shown on the free Leaflet/OpenStreetMap
   // map on their storefront page (no Google Maps API key needed - see
@@ -282,12 +312,48 @@ model Order {
   deliveryLongitude Decimal? @db.Decimal(10, 7)
 
   items OrderItem[]
+  fraudFlags FraudFlag[]
 
   @@index([buyerId])
   @@index([recipientId])
   @@index([organizationId, status])
   @@index([riderId, status])
   @@map("orders")
+}
+
+// Automated fraud/abuse detection for orders - rule-based, NOT a blind
+// auto-block. Every flag just adds a row here and the order keeps
+// proceeding normally; an admin reviews the queue and decides whether to
+// contact the buyer, cancel, or dismiss the flag as a false positive. See
+// FraudDetectionService for the actual rules (rapid repeat orders,
+// repeated COD cancellations/no-shows, mismatched payment TrxID reused
+// across orders, etc).
+model FraudFlag {
+  id         String   @id @default(uuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reason     String
+  severity   FraudSeverity @default(LOW)
+  createdAt  DateTime @default(now())
+
+  // Admin review - resolved stays false until an admin looks at it and
+  // either dismisses or acts on it. Not a hard block on anything; purely
+  // a visibility/review queue.
+  resolved     Boolean  @default(false)
+  resolvedAt   DateTime?
+  resolvedById String?
+  resolvedBy   User?    @relation("FraudFlagsReviewed", fields: [resolvedById], references: [id])
+  resolutionNote String? @db.Text
+
+  @@index([orderId])
+  @@index([resolved, severity])
+  @@map("fraud_flags")
+}
+
+enum FraudSeverity {
+  LOW
+  MEDIUM
+  HIGH
 }
 
 model OrderItem {

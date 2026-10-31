@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException, BadRequestException 
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { SkodePayService } from '../skodepay/skodepay.service.js';
+import { FraudDetectionService } from '../fraud/fraud-detection.service.js';
 import {
   CreateOrderDto,
   UpdateOrderStatusDto,
@@ -24,6 +25,7 @@ export class OrdersService {
     private prisma: PrismaService,
     private notifications: NotificationsService,
     private skodePay: SkodePayService,
+    private fraudDetection: FraudDetectionService,
   ) {}
 
   // Price comes from the server's own Product/ProductVariant record, NEVER
@@ -149,6 +151,13 @@ export class OrdersService {
         // successfully placed and paid-for order.
       });
     }
+
+    // Fraud detection runs AFTER the order is fully created and never
+    // blocks or delays the buyer - a flag just adds to the admin review
+    // queue, the order itself proceeds exactly as normal either way.
+    const totalAmount = order.items.reduce((sum, it) => sum + Number(it.price) * it.quantity, 0);
+    await this.fraudDetection.evaluateNewOrder(order.id, buyerId, dto.organizationId, totalAmount);
+
     return order;
   }
 
@@ -373,13 +382,18 @@ export class OrdersService {
     if (order.paymentMethod === 'CASH_ON_DELIVERY') {
       throw new BadRequestException('Cash on delivery orders do not need payment proof');
     }
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: {
         paymentTrxId: dto.trxId,
         paymentVerification: 'PENDING_VERIFICATION',
       },
     });
+    // Catches the single clearest fraud signal available for manual
+    // bKash/Nagad payments: the exact same transaction ID submitted as
+    // "proof" on more than one order.
+    await this.fraudDetection.evaluatePaymentProof(orderId, dto.trxId);
+    return updated;
   }
 
   // Vendor (or admin) checks the TrxID against their own bKash/Nagad

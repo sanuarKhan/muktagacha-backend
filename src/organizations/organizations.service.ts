@@ -128,6 +128,73 @@ export class OrganizationsService {
     });
   }
 
+  // ───────────────────────── Vendor trust verification ─────────────────────────
+  // Optional, separate from approval. Vendor uploads a trade license
+  // and/or NID photo (already hosted via the existing Cloudinary signing
+  // flow - this just records the resulting URLs) - at least ONE is
+  // required to move past UNVERIFIED, both are accepted if the vendor
+  // wants to submit both for a stronger review.
+  async submitVerification(
+    id: string,
+    userId: string,
+    role: string,
+    data: { tradeLicenseUrl?: string; nidUrl?: string },
+  ) {
+    await this.assertOwnerOrAdmin(id, userId, role);
+    if (!data.tradeLicenseUrl && !data.nidUrl) {
+      throw new ForbiddenException(
+        'Upload at least a trade license or an NID photo to request verification',
+      );
+    }
+    return this.prisma.organization.update({
+      where: { id },
+      data: {
+        tradeLicenseUrl: data.tradeLicenseUrl,
+        nidUrl: data.nidUrl,
+        verificationStatus: 'PENDING_REVIEW',
+        // Clear any stale rejection note from a prior failed attempt -
+        // this is a fresh submission.
+        verificationNote: null,
+      },
+    });
+  }
+
+  // Admin-only: shops waiting on a verification review.
+  findPendingVerifications() {
+    return this.prisma.organization.findMany({
+      where: { verificationStatus: 'PENDING_REVIEW' },
+      include: { owner: { select: { id: true, fullName: true, phone: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async verify(id: string, adminUserId: string) {
+    const org = await this.prisma.organization.findUnique({ where: { id } });
+    if (!org) throw new NotFoundException('Organization not found');
+    return this.prisma.organization.update({
+      where: { id },
+      data: {
+        verificationStatus: 'VERIFIED',
+        verifiedAt: new Date(),
+        verifiedById: adminUserId,
+      },
+    });
+  }
+
+  async rejectVerification(id: string, adminUserId: string, note?: string) {
+    const org = await this.prisma.organization.findUnique({ where: { id } });
+    if (!org) throw new NotFoundException('Organization not found');
+    return this.prisma.organization.update({
+      where: { id },
+      data: {
+        verificationStatus: 'REJECTED',
+        verifiedAt: new Date(),
+        verifiedById: adminUserId,
+        verificationNote: note,
+      },
+    });
+  }
+
   async assertOwnerOrAdmin(orgId: string, userId: string, role: string) {
     if (role === 'ADMIN') return;
     const org = await this.prisma.organization.findUnique({

@@ -117,4 +117,46 @@ export class OrganizationsController {
   reject(@Param('id') id: string) {
     return this.orgsService.reject(id);
   }
+
+  // Vendor submits their trade license and/or NID photo (already uploaded
+  // via the existing Cloudinary signing flow) to request a Verified badge.
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/verification')
+  submitVerification(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { tradeLicenseUrl?: string; nidUrl?: string },
+  ) {
+    return this.orgsService.submitVerification(
+      id,
+      req.user.userId,
+      req.user.role,
+      body,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Get('pending-verifications')
+  findPendingVerifications() {
+    return this.orgsService.findPendingVerifications();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id/verify')
+  verify(@Req() req: any, @Param('id') id: string) {
+    return this.orgsService.verify(id, req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id/reject-verification')
+  rejectVerification(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { note?: string },
+  ) {
+    return this.orgsService.rejectVerification(id, req.user.userId, body.note);
+  }
 }
