@@ -32,6 +32,13 @@ export class OrdersController {
     return this.ordersService.findMine(req.user.userId);
   }
 
+  // Gifts sent TO this user by someone else - declared before ':id' so
+  // NestJS doesn't treat "gifts-received" as an order id.
+  @Get('gifts-received')
+  findGiftsReceived(@Req() req: any) {
+    return this.ordersService.findGiftsReceived(req.user.userId);
+  }
+
   @Get('organization/:organizationId')
   findByOrganization(@Param('organizationId') organizationId: string) {
     return this.ordersService.findByOrganization(organizationId);

@@ -80,6 +80,7 @@ model User {
   directConversationsAsB DirectConversation[] @relation("DirectConversationsAsB")
   directMessagesSent     DirectMessage[]      @relation("DirectMessagesSent")
   replyVotesCast         ReplyVote[]          @relation("ReplyVotesCast")
+  ordersReceivedAsGift   Order[]              @relation("OrdersReceivedAsGift")
 
   @@index([area, ward])
   @@map("users")
@@ -233,6 +234,23 @@ model Order {
   paymentMethod  PaymentMethod
   createdAt      DateTime      @default(now())
 
+  // Gift orders: buyer PAYS, recipient RECEIVES - like sending a gift to a
+  // partner/friend from any shop on the platform. recipientId is nullable;
+  // when null the order is a normal self-purchase (buyer = recipient,
+  // implicitly). giftSenderAnonymous controls whether the recipient sees
+  // the buyer's real name or "A Secret Admirer" - buyer's choice per gift.
+  isGift              Boolean  @default(false)
+  recipientId         String?
+  recipient           User?    @relation("OrdersReceivedAsGift", fields: [recipientId], references: [id])
+  giftMessage         String?  @db.Text
+  giftSenderAnonymous Boolean  @default(false)
+
+  // Free-text delivery address - needed for gift orders where the buyer is
+  // entering the RECIPIENT's address directly (buyer's own saved area/ward
+  // doesn't apply here), but also useful generally for any order where a
+  // map pin alone isn't precise enough (building/floor/landmark notes).
+  deliveryAddressText String? @db.Text
+
   // Buyer-submitted proof of payment for BKASH/NAGAD orders (irrelevant
   // for CASH_ON_DELIVERY, which stays NOT_SUBMITTED/unused).
   paymentTrxId          String?
@@ -266,6 +284,7 @@ model Order {
   items OrderItem[]
 
   @@index([buyerId])
+  @@index([recipientId])
   @@index([organizationId, status])
   @@index([riderId, status])
   @@map("orders")
@@ -430,6 +449,11 @@ model ShopQuestion {
   askerId        String
   asker          User         @relation("QuestionsAsked", fields: [askerId], references: [id])
   body           String       @db.Text
+  // Author identity is ALWAYS stored (askerId above) for moderation/abuse
+  // accountability - isAnonymous only controls what's shown to OTHER users
+  // ("Anonymous" instead of the real name). Never actually anonymous at
+  // the data layer, which is the correct tradeoff for a real platform.
+  isAnonymous    Boolean      @default(false)
   createdAt      DateTime     @default(now())
 
   replies ShopQuestionReply[]
@@ -445,6 +469,7 @@ model ShopQuestionReply {
   authorId      String
   author        User         @relation("QuestionRepliesAuthored", fields: [authorId], references: [id])
   body          String       @db.Text
+  isAnonymous   Boolean      @default(false)
   score         Int          @default(0)
   createdAt     DateTime     @default(now())
 
@@ -520,13 +545,14 @@ model GroupTopic {
 }
 
 model GroupPost {
-  id        String     @id @default(uuid())
-  topicId   String
-  topic     GroupTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  authorId  String
-  author    User       @relation("GroupPostsAuthored", fields: [authorId], references: [id])
-  body      String     @db.Text
-  createdAt DateTime   @default(now())
+  id          String     @id @default(uuid())
+  topicId     String
+  topic       GroupTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User       @relation("GroupPostsAuthored", fields: [authorId], references: [id])
+  body        String     @db.Text
+  isAnonymous Boolean    @default(false)
+  createdAt   DateTime   @default(now())
 
   @@index([topicId, createdAt])
   @@map("group_posts")

@@ -14,6 +14,23 @@ const SAFE_USER_SELECT = {
   role: true,
 } as const;
 
+const ANONYMOUS_AUTHOR = { id: '', fullName: 'Anonymous', role: 'BUYER' as const };
+
+// Masks the real author on anything flagged isAnonymous before it leaves
+// the server - askerId/authorId stay real in the DB row (moderation /
+// abuse accountability), only the API RESPONSE hides identity. Applied at
+// the boundary so every call site gets this for free instead of each one
+// needing to remember to mask manually.
+function maskAnonymous<T extends { isAnonymous?: boolean; asker?: unknown; author?: unknown }>(
+  item: T,
+): T {
+  if (!item.isAnonymous) return item;
+  const masked = { ...item };
+  if ('asker' in masked) (masked as any).asker = ANONYMOUS_AUTHOR;
+  if ('author' in masked) (masked as any).author = ANONYMOUS_AUTHOR;
+  return masked;
+}
+
 @Injectable()
 export class ChatService {
   constructor(
@@ -138,8 +155,8 @@ export class ChatService {
   // "common place where everyone can chat" the client asked for: visible to
   // every visitor on the shop's storefront page, not just the asker/vendor.
 
-  getQuestions(organizationId: string) {
-    return this.prisma.shopQuestion.findMany({
+  async getQuestions(organizationId: string) {
+    const questions = await this.prisma.shopQuestion.findMany({
       where: { organizationId },
       include: {
         asker: { select: SAFE_USER_SELECT },
@@ -149,28 +166,34 @@ export class ChatService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    return questions.map((q) => ({
+      ...maskAnonymous(q),
+      replies: q.replies.map((r) => maskAnonymous(r)),
+    }));
   }
 
   async askQuestion(organizationId: string, userId: string, dto: AskQuestionDto) {
     const org = await this.prisma.organization.findUnique({ where: { id: organizationId } });
     if (!org) throw new NotFoundException('Shop not found');
     const question = await this.prisma.shopQuestion.create({
-      data: { organizationId, askerId: userId, body: dto.body },
+      data: { organizationId, askerId: userId, body: dto.body, isAnonymous: !!dto.isAnonymous },
       include: { asker: { select: SAFE_USER_SELECT } },
     });
-    this.gateway.emitNewQuestion(organizationId, question);
-    return question;
+    const masked = maskAnonymous(question);
+    this.gateway.emitNewQuestion(organizationId, masked);
+    return masked;
   }
 
   async replyQuestion(questionId: string, userId: string, dto: ReplyQuestionDto) {
     const question = await this.prisma.shopQuestion.findUnique({ where: { id: questionId } });
     if (!question) throw new NotFoundException('Question not found');
     const reply = await this.prisma.shopQuestionReply.create({
-      data: { questionId, authorId: userId, body: dto.body },
+      data: { questionId, authorId: userId, body: dto.body, isAnonymous: !!dto.isAnonymous },
       include: { author: { select: SAFE_USER_SELECT } },
     });
-    this.gateway.emitNewReply(question.organizationId, reply);
-    return reply;
+    const masked = maskAnonymous(reply);
+    this.gateway.emitNewReply(question.organizationId, masked);
+    return masked;
   }
 
   // Reddit-style up/down vote on an answer. Clicking the SAME direction

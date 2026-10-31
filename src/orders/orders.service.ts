@@ -33,6 +33,19 @@ export class OrdersService {
   // racing for the last unit can't both succeed (the update's WHERE
   // clause only matches if enough stock remains at the moment of write).
   async create(buyerId: string, dto: CreateOrderDto) {
+    // Gift validation happens outside the transaction (read-only check,
+    // no need to hold a DB transaction open for it).
+    if (dto.isGift) {
+      if (!dto.recipientId) {
+        throw new BadRequestException('Choose who this gift is for');
+      }
+      if (dto.recipientId === buyerId) {
+        throw new BadRequestException("You can't send a gift to yourself");
+      }
+      const recipient = await this.prisma.user.findUnique({ where: { id: dto.recipientId } });
+      if (!recipient) throw new NotFoundException('Recipient not found');
+    }
+
     const order = await this.prisma.$transaction(async (tx) => {
       const itemsWithPrice: {
         productId: string;
@@ -104,6 +117,11 @@ export class OrdersService {
           status: 'PENDING',
           deliveryLatitude: dto.deliveryLatitude,
           deliveryLongitude: dto.deliveryLongitude,
+          deliveryAddressText: dto.deliveryAddressText,
+          isGift: !!dto.isGift,
+          recipientId: dto.isGift ? dto.recipientId : undefined,
+          giftMessage: dto.isGift ? dto.giftMessage : undefined,
+          giftSenderAnonymous: dto.isGift ? !!dto.giftSenderAnonymous : false,
           // Manual-MFS orders need a TrxID before the vendor will confirm
           // them; cash orders have nothing to verify.
           paymentVerification:
@@ -112,11 +130,25 @@ export class OrdersService {
               : 'PENDING_VERIFICATION',
           items: { create: itemsWithPrice },
         },
-        include: { items: true, buyer: { select: SAFE_BUYER_SELECT }, organization: true },
+        include: {
+          items: true,
+          buyer: { select: SAFE_BUYER_SELECT },
+          recipient: { select: SAFE_BUYER_SELECT },
+          organization: true,
+        },
       });
     });
 
     await this.notifications.notifyOrderCreated(order);
+    if (order.isGift && order.recipientId) {
+      // Recipient gets their own notification - a different message than
+      // the buyer's order-confirmation one, since from the recipient's side
+      // this isn't "your order was placed", it's "someone sent you a gift".
+      await this.notifications.notifyGiftReceived(order).catch(() => {
+        // Non-fatal: notification failure should never roll back a
+        // successfully placed and paid-for order.
+      });
+    }
     return order;
   }
 
@@ -140,9 +172,37 @@ export class OrdersService {
   findMine(buyerId: string) {
     return this.prisma.order.findMany({
       where: { buyerId },
-      include: { items: { include: { product: true, variant: true } }, organization: true },
+      include: {
+        items: { include: { product: true, variant: true } },
+        organization: true,
+        recipient: { select: SAFE_BUYER_SELECT },
+      },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  // Gifts this user has RECEIVED from someone else - separate from
+  // findMine (which is what they bought/sent). Shown on its own "Gifts for
+  // you" section rather than mixed into the normal order list, since from
+  // the recipient's side these aren't purchases they made.
+  findGiftsReceived(recipientId: string) {
+    return this.prisma.order.findMany({
+      where: { recipientId, isGift: true },
+      include: {
+        items: { include: { product: true, variant: true } },
+        organization: true,
+        // Only expose the sender's identity if they chose NOT to stay
+        // anonymous - otherwise this field is omitted entirely rather
+        // than relying on the frontend to remember to hide it.
+        buyer: { select: SAFE_BUYER_SELECT },
+      },
+      orderBy: { createdAt: 'desc' },
+    }).then((orders) =>
+      orders.map((o) => ({
+        ...o,
+        buyer: o.giftSenderAnonymous ? null : o.buyer,
+      })),
+    );
   }
 
   findByOrganization(organizationId: string) {
@@ -151,29 +211,38 @@ export class OrdersService {
       include: {
         items: { include: { product: true, variant: true } },
         buyer: { select: SAFE_BUYER_SELECT },
+        recipient: { select: SAFE_BUYER_SELECT },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  // Single order detail, with everything an invoice/receipt needs. Only
-  // the buyer who placed it, the vendor who owns it, or an admin can
-  // view it - an order is private, not a public resource.
+  // Single order detail, with everything an invoice/receipt needs. The
+  // buyer who placed it, the vendor who owns it, the GIFT RECIPIENT (if
+  // this is a gift order), or an admin can view it - an order is private,
+  // not a public resource.
   async findOne(orderId: string, userId: string, role: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: {
         items: { include: { product: true, variant: true } },
         buyer: { select: SAFE_BUYER_SELECT },
+        recipient: { select: SAFE_BUYER_SELECT },
         organization: true,
         rider: { select: { fullName: true, phone: true } },
       },
     });
     if (!order) throw new NotFoundException('Order not found');
     const isBuyer = order.buyerId === userId;
+    const isRecipient = order.recipientId === userId;
     const isVendorOwner = order.organization.ownerUserId === userId;
-    if (role !== 'ADMIN' && !isBuyer && !isVendorOwner) {
+    if (role !== 'ADMIN' && !isBuyer && !isRecipient && !isVendorOwner) {
       throw new ForbiddenException("This isn't your order");
+    }
+    // Recipient viewing an anonymous gift never sees the sender's identity,
+    // even though they're an authorized viewer of the order itself.
+    if (isRecipient && !isBuyer && order.giftSenderAnonymous) {
+      return { ...order, buyer: null };
     }
     return order;
   }

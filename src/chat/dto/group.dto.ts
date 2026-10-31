@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsBoolean, MaxLength } from 'class-validator';
 
 export class CreateGroupDto {
   @IsString()
@@ -34,4 +34,8 @@ export class CreatePostDto {
   @IsNotEmpty()
   @MaxLength(4000)
   body!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isAnonymous?: boolean;
 }

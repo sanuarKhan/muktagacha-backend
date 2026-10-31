@@ -7,6 +7,7 @@ import {
   IsInt,
   Min,
   IsOptional,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -37,6 +38,30 @@ export class CreateOrderDto {
   @IsOptional()
   @IsNumber()
   deliveryLongitude?: number;
+
+  @IsOptional()
+  @IsString()
+  deliveryAddressText?: string;
+
+  // Gift order fields - all optional, a normal self-purchase sets none of
+  // these. When isGift is true, recipientId is required (checked in the
+  // service, not here, since it needs a DB lookup to validate the user
+  // exists and isn't the buyer themselves).
+  @IsOptional()
+  @IsBoolean()
+  isGift?: boolean;
+
+  @IsOptional()
+  @IsString()
+  recipientId?: string;
+
+  @IsOptional()
+  @IsString()
+  giftMessage?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  giftSenderAnonymous?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })

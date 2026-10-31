@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsBoolean, MaxLength } from 'class-validator';
 
 export class SendMessageDto {
   @IsString()
@@ -23,6 +23,10 @@ export class AskQuestionDto {
   @IsNotEmpty()
   @MaxLength(2000)
   body!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isAnonymous?: boolean;
 }
 
 export class ReplyQuestionDto {
@@ -30,6 +34,10 @@ export class ReplyQuestionDto {
   @IsNotEmpty()
   @MaxLength(2000)
   body!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isAnonymous?: boolean;
 }
 
 export class SendDirectMessageDto {

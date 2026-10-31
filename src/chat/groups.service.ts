@@ -9,6 +9,13 @@ const SAFE_USER_SELECT = {
   role: true,
 } as const;
 
+const ANONYMOUS_AUTHOR = { id: '', fullName: 'Anonymous', role: 'BUYER' as const };
+
+function maskAnonymous<T extends { isAnonymous?: boolean; author?: unknown }>(item: T): T {
+  if (!item.isAnonymous) return item;
+  return { ...item, author: ANONYMOUS_AUTHOR };
+}
+
 @Injectable()
 export class GroupsService {
   constructor(
@@ -126,11 +133,12 @@ export class GroupsService {
     const topic = await this.prisma.groupTopic.findUnique({ where: { id: topicId } });
     if (!topic) throw new NotFoundException('Topic not found');
     await this.assertMember(topic.groupId, userId);
-    return this.prisma.groupPost.findMany({
+    const posts = await this.prisma.groupPost.findMany({
       where: { topicId },
       include: { author: { select: SAFE_USER_SELECT } },
       orderBy: { createdAt: 'asc' },
     });
+    return posts.map((p) => maskAnonymous(p));
   }
 
   async createPost(topicId: string, userId: string, dto: CreatePostDto) {
@@ -138,10 +146,11 @@ export class GroupsService {
     if (!topic) throw new NotFoundException('Topic not found');
     await this.assertMember(topic.groupId, userId);
     const post = await this.prisma.groupPost.create({
-      data: { topicId, authorId: userId, body: dto.body },
+      data: { topicId, authorId: userId, body: dto.body, isAnonymous: !!dto.isAnonymous },
       include: { author: { select: SAFE_USER_SELECT } },
     });
-    this.gateway.emitNewPost(topicId, post);
-    return post;
+    const masked = maskAnonymous(post);
+    this.gateway.emitNewPost(topicId, masked);
+    return masked;
   }
 }

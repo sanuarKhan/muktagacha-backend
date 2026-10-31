@@ -63,4 +63,23 @@ export class NotificationsService {
       `Congratulations! Your storefront "${orgName}" has been approved and is now live on Muktagacha.`,
     );
   }
+
+  // A gift order's recipient needs a DIFFERENT message than the buyer's own
+  // order-confirmation SMS - from their side this is "someone sent you
+  // something", not "your order was placed". Respects giftSenderAnonymous:
+  // the buyer's real name is only mentioned in the SMS if they chose to
+  // reveal it.
+  async notifyGiftReceived(order: any) {
+    const phone = order.recipient?.phone;
+    if (!phone) return;
+    const senderName = order.giftSenderAnonymous
+      ? 'A Secret Admirer'
+      : order.buyer?.fullName ?? 'Someone';
+    const shopName = order.organization?.name ?? 'a Muktagacha shop';
+    const messageLine = order.giftMessage ? ` They said: "${order.giftMessage}"` : '';
+    await this.sendSms(
+      phone,
+      `${senderName} sent you a gift from ${shopName} on Muktagacha!${messageLine} It's on its way.`,
+    );
+  }
 }
