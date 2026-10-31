@@ -162,3 +162,25 @@ heavy usage:**
   once real order volume exists.
 - No new infrastructure or cost - reuses existing Cloudinary uploads and
   Postgres.
+
+## 11. Pharmacy prescriptions + Services booking vertical (Phase 1 complete)
+
+- **Pharmacy**: vendors mark specific medicines as needing a prescription;
+  an order with any such item requires a buyer-uploaded prescription photo
+  before the pharmacy can confirm it (hard-blocked server-side, not just a
+  UI suggestion). Same manual-review pattern as payment verification.
+- **Services**: a dedicated request/quote flow at /services and
+  /bookings, separate from the Marketplace cart - buyer describes the
+  job, provider sends a price quote, buyer accepts, provider does the
+  work, payment happens after (matches the Sheba.xyz reference model
+  named in the original plan). New vendor "Bookings" tab replaces
+  "Products" for SERVICES-vertical shops.
+- With this, all three Phase 1 verticals from the original plan
+  (Marketplace, Pharmacy, Services) are now functionally complete, not
+  just label-only enum values.
+- Known gap: no real calendar/slot-based scheduling for Services yet -
+  "preferred time" is free text the provider reads and coordinates
+  manually, matching the plan's explicit Phase 1 vs Phase 1.5 sequencing
+  (real slot booking was always scoped for later).
+- No new infrastructure or cost - reuses existing Cloudinary uploads,
+  Postgres, and the SMS notification pipeline.
