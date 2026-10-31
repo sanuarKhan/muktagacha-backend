@@ -99,19 +99,34 @@ users — they're the deliberate "smallest version that's honestly useful"
 cuts, listed here so they're a visible backlog, not a silent gap discovered
 later.
 
-## 7. Answer voting + customer-to-customer messenger (added after client follow-up)
+## 7. Answer voting + customer-to-customer messenger
 
-- **Reddit-style voting**: each Q&A answer now has a live net score
-  (upvotes minus downvotes); answers sort best-score-first instead of
-  oldest-first. This is the actual mechanism requested — not a simple
-  "helpful" counter — matching how Reddit surfaces its best answer.
-- **Customer-to-customer messenger**: buyers can now message each other
+- **Reddit-style voting**: each Q&A answer has a live net score (upvotes
+  minus downvotes); answers sort best-score-first instead of oldest-first.
+- **Customer-to-customer messenger**: buyers can message each other
   directly (not just a shop), discoverable via a "Message" button on
   Community posts. Either side can start this freely — unlike the
   buyer-vendor rule, there's no "only one side can initiate" restriction
   here, since it's peer discussion, not a sales channel.
 - No new infrastructure or cost for either — reuses the same Postgres
   tables and Socket.IO gateway as the rest of the chat system.
-- Same shortcuts apply as Section 6 (no pagination, no attachments, no
-  push notifications) — these two features inherit that backlog rather
-  than introducing new gaps.
+
+## 8. Anonymous posting + gift orders (added after client follow-up)
+
+- **Anonymous posting**: Q&A questions/answers and community posts can be
+  marked anonymous by the author at posting time. Real identity is always
+  kept in the database (never actually anonymous at the data layer - a
+  vendor/admin with DB access could still trace abuse back to a real
+  account), only hidden from other users in the API response. This is the
+  correct and standard tradeoff for a real platform (compare: Reddit
+  "throwaway" accounts are still traceable by Reddit itself).
+- **Gift orders**: a buyer can send an order to a different registered
+  user, found via name/phone search. Sender chooses per-gift whether to
+  reveal their identity or appear as "A Secret Admirer" to the recipient
+  - enforced server-side in both the gifts-received list and the SMS
+    notification, not just hidden in the UI.
+- Known gap: the recipient is NOT verified as a real, reachable phone
+  number before the gift ships - if someone registers with a fake/wrong
+  phone, the gift notification simply won't reach them (same limitation
+  as the rest of the SMS system, not new to gifting).
+- No new infrastructure or cost for either feature.
