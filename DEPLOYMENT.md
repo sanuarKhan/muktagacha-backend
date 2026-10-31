@@ -184,3 +184,83 @@ heavy usage:**
   (real slot booking was always scoped for later).
 - No new infrastructure or cost - reuses existing Cloudinary uploads,
   Postgres, and the SMS notification pipeline.
+
+## 12. Shop ratings & reviews (Phase 1.5 item 1)
+
+- One review per completed transaction (Order, ServiceRequest, or
+  SlotBooking), left by the buyer - same proven pattern as the existing
+  RiderProfile/DeliveryRating system, applied to shops instead of
+  individual riders. `Organization.avgRating`/`reviewCount` are
+  denormalized counters recomputed on every new review.
+- A buyer can only review a transaction they actually completed, and
+  only once per transaction.
+- Shown on the shop-info modal; a "rate this shop/provider" star picker
+  appears on completed Orders/Bookings/Sessions that haven't been
+  reviewed yet.
+- No new infrastructure or cost.
+
+## 13. Closed-loop wallet (Phase 1.5 item 2)
+
+- Buyers top up wallet credit by paying the platform's own bKash/Nagad
+  number directly and submitting a TrxID; an admin verifies it (same
+  manual-proof pattern as every other payment in this system) before
+  credit is added.
+- **Hard legal constraint, enforced by omission**: there is no
+  withdraw-to-cash or transfer-to-another-user code path anywhere in
+  WalletsService - credit only ever moves in (verified topup) or out
+  against a real purchase. This keeps it simple closed-loop store credit
+  (legal in Bangladesh, no banking license needed) rather than an
+  e-money product or anything resembling a cryptocurrency.
+- WALLET is a real payment method on Orders, ServiceRequests, and
+  SlotBookings - spend happens atomically with the purchase (insufficient
+  balance rolls back the whole transaction, including any stock already
+  decremented).
+- New buyer-facing `/wallet` page (balance, top-up form, transaction
+  history) and admin "Wallet top-ups" review queue.
+- No new infrastructure or cost.
+
+## 14. Escrow for wallet-paid orders/bookings (Phase 1.5 item 3)
+
+- **Scoped honestly to where it's technically real**: bKash/Nagad/
+  SkodePay payments all go straight to the vendor in this system
+  (SkodePay uses the vendor's own API key) - the platform never touches
+  that cash, so it can't honestly "hold and release" it. Wallet payments
+  are the one case where the platform genuinely controls a real balance,
+  so escrow applies ONLY to wallet-paid Orders/ServiceRequests/
+  SlotBookings; every other payment method stays `NOT_APPLICABLE`.
+- **Security model**: release is a server-side-only action behind an
+  admin-only route guard (not just hidden in the UI). Release requires
+  the buyer's own confirmation first (a vendor marking their own order
+  "completed" is not sufficient proof) - an admin can force-release for
+  a genuinely unresponsive buyer, but every override is permanently
+  logged against that admin's account. Escrow already released can never
+  be clawed back by a later cancellation; cancelling a still-held escrow
+  refunds the wallet credit back to the buyer.
+- New admin "Escrow" tab shows every held payment with the buyer's
+  confirmation state and a disabled-until-confirmed release button plus
+  an explicit, confirmation-gated force-release escape hatch.
+- No new infrastructure or cost.
+
+## 15. Calendar-based slot booking - Education vertical (Phase 1.5 item 4)
+
+- New `EDUCATION` vertical for tutoring/consultation, named explicitly in
+  the original plan as its own focused piece of work. A deliberately
+  THIRD distinct booking shape in this schema (alongside Order's
+  cart/checkout and ServiceRequest's request-then-quote): a tutor
+  publishes real calendar time slots in advance at a known price, a
+  student books one instantly - no cart, no waiting for a quote.
+- **Race-safety**: booking a slot updates it with a `WHERE status='OPEN'`
+  clause inside a transaction - two students racing for the same slot
+  can never both succeed, backed by the database's own row-level
+  locking rather than application logic that could race.
+- Same payment/escrow/review machinery as Orders and ServiceRequests
+  (wallet payments held in escrow, released only after the student
+  confirms the session happened).
+- New vendor "My Schedule" tab (publish/cancel slots, set a meeting link
+  for online sessions, mark completed), public `/education` browse-and-
+  book page, and buyer `/sessions` page (pay, join meeting link, confirm,
+  review).
+- With this, all four Phase 1.5 items from the original roadmap
+  (ratings/reviews, wallet, escrow, slot booking) are complete.
+- No new infrastructure or cost - reuses existing Postgres, the wallet
+  system, and the escrow system built earlier in this phase.
