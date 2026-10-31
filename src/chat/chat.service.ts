@@ -143,7 +143,9 @@ export class ChatService {
       where: { organizationId },
       include: {
         asker: { select: SAFE_USER_SELECT },
-        replies: { include: { author: { select: SAFE_USER_SELECT } }, orderBy: { createdAt: 'asc' } },
+        // Best-answer-first, Reddit-style: highest net score (upvotes minus
+        // downvotes) surfaces to the top instead of whoever replied first.
+        replies: { include: { author: { select: SAFE_USER_SELECT } }, orderBy: { score: 'desc' } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -169,5 +171,46 @@ export class ChatService {
     });
     this.gateway.emitNewReply(question.organizationId, reply);
     return reply;
+  }
+
+  // Reddit-style up/down vote on an answer. Clicking the SAME direction
+  // again removes the vote (un-voting); clicking the OPPOSITE direction
+  // flips it. `score` on the reply is kept denormalized so sorting
+  // "best answer first" never needs a live aggregate query.
+  async voteReply(replyId: string, userId: string, value: 'UP' | 'DOWN') {
+    const reply = await this.prisma.shopQuestionReply.findUnique({
+      where: { id: replyId },
+      include: { question: { select: { organizationId: true } } },
+    });
+    if (!reply) throw new NotFoundException('Answer not found');
+    if (reply.authorId === userId) {
+      throw new BadRequestException("You can't vote on your own answer");
+    }
+
+    const existing = await this.prisma.replyVote.findUnique({
+      where: { replyId_userId: { replyId, userId } },
+    });
+
+    let scoreDelta = 0;
+    if (!existing) {
+      await this.prisma.replyVote.create({ data: { replyId, userId, value } });
+      scoreDelta = value === 'UP' ? 1 : -1;
+    } else if (existing.value === value) {
+      // Same direction clicked again - remove the vote entirely.
+      await this.prisma.replyVote.delete({ where: { id: existing.id } });
+      scoreDelta = value === 'UP' ? -1 : 1;
+    } else {
+      // Opposite direction - flip it (counts double: e.g. DOWN -> UP is +2).
+      await this.prisma.replyVote.update({ where: { id: existing.id }, data: { value } });
+      scoreDelta = value === 'UP' ? 2 : -2;
+    }
+
+    const updated = await this.prisma.shopQuestionReply.update({
+      where: { id: replyId },
+      data: { score: { increment: scoreDelta } },
+      include: { author: { select: SAFE_USER_SELECT } },
+    });
+    this.gateway.emitReplyScoreChanged(reply.question.organizationId, replyId, updated.score);
+    return { score: updated.score };
   }
 }

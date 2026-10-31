@@ -76,6 +76,10 @@ model User {
   groupMemberships     GroupMember[]       @relation("GroupMemberships")
   groupTopicsCreated   GroupTopic[]        @relation("GroupTopicsCreated")
   groupPostsAuthored   GroupPost[]         @relation("GroupPostsAuthored")
+  directConversationsAsA DirectConversation[] @relation("DirectConversationsAsA")
+  directConversationsAsB DirectConversation[] @relation("DirectConversationsAsB")
+  directMessagesSent     DirectMessage[]      @relation("DirectMessagesSent")
+  replyVotesCast         ReplyVote[]          @relation("ReplyVotesCast")
 
   @@index([area, ward])
   @@map("users")
@@ -435,15 +439,19 @@ model ShopQuestion {
 }
 
 model ShopQuestionReply {
-  id         String       @id @default(uuid())
-  questionId String
-  question   ShopQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  authorId   String
-  author     User         @relation("QuestionRepliesAuthored", fields: [authorId], references: [id])
-  body       String       @db.Text
-  createdAt  DateTime     @default(now())
+  id            String       @id @default(uuid())
+  questionId    String
+  question      ShopQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  authorId      String
+  author        User         @relation("QuestionRepliesAuthored", fields: [authorId], references: [id])
+  body          String       @db.Text
+  score         Int          @default(0)
+  createdAt     DateTime     @default(now())
+
+  votes ReplyVote[]
 
   @@index([questionId, createdAt])
+  @@index([questionId, score])
   @@map("shop_question_replies")
 }
 
@@ -522,4 +530,81 @@ model GroupPost {
 
   @@index([topicId, createdAt])
   @@map("group_posts")
+}
+
+// =============================================================================
+// PEER-TO-PEER MESSAGING (customer <-> customer)
+// =============================================================================
+// Separate from Conversation (buyer<->vendor) on purpose: the business rule
+// is the OPPOSITE here - either side can start a chat freely, no "only one
+// side can initiate" restriction. Any two users (most commonly two buyers
+// who met through a Group or a shop's Q&A board) can message each other
+// directly, like a normal messenger.
+// =============================================================================
+
+model DirectConversation {
+  id         String   @id @default(uuid())
+  // Always stored with userAId < userBId (enforced in the service layer)
+  // so a conversation between the same two people can never be created
+  // twice in either direction.
+  userAId    String
+  userA      User     @relation("DirectConversationsAsA", fields: [userAId], references: [id])
+  userBId    String
+  userB      User     @relation("DirectConversationsAsB", fields: [userBId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  messages DirectMessage[]
+
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
+  @@map("direct_conversations")
+}
+
+model DirectMessage {
+  id             String             @id @default(uuid())
+  conversationId String
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User               @relation("DirectMessagesSent", fields: [senderId], references: [id])
+  body           String             @db.Text
+  readAt         DateTime?
+  createdAt      DateTime           @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("direct_messages")
+}
+
+// =============================================================================
+// Q&A ANSWER CREDIBILITY — Reddit-style upvote/downvote
+// =============================================================================
+// Exactly the Reddit pattern the client asked for: someone asks a question,
+// the community answers, and OTHER community members vote each answer up or
+// down so the best real answer rises to the top by net score (upvotes minus
+// downvotes) - not a star-rating on a person, a live-ranked trust signal on
+// each individual answer. One vote per (user, reply); voting the opposite
+// direction flips it, voting the same direction again removes it (clicking
+// upvote twice = un-voting, same as Reddit). `score` is denormalized onto
+// ShopQuestionReply for cheap sort-by-best-answer queries (same pattern as
+// RiderProfile.avgRating elsewhere in this schema).
+// =============================================================================
+
+enum VoteValue {
+  UP
+  DOWN
+}
+
+model ReplyVote {
+  id        String            @id @default(uuid())
+  replyId   String
+  reply     ShopQuestionReply @relation(fields: [replyId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User              @relation("ReplyVotesCast", fields: [userId], references: [id])
+  value     VoteValue
+  createdAt DateTime          @default(now())
+
+  @@unique([replyId, userId])
+  @@index([replyId])
+  @@map("reply_votes")
 }

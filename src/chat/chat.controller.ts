@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, UseGuards, Req, BadRequestException } from '@nestjs/common';
 import { ChatService } from './chat.service.js';
 import {
   SendMessageDto,
@@ -7,7 +7,6 @@ import {
   ReplyQuestionDto,
 } from './dto/chat.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
 export class ChatController {
@@ -58,5 +57,17 @@ export class ChatController {
   @Post('questions/:id/replies')
   replyQuestion(@Req() req: any, @Param('id') id: string, @Body() dto: ReplyQuestionDto) {
     return this.chatService.replyQuestion(id, req.user.userId, dto);
+  }
+
+  // Reddit-style up/down vote on an answer - value is 'UP' or 'DOWN' in the
+  // URL so re-clicking the same button is a clean idempotent toggle from
+  // the frontend's perspective (no need to track local vote state first).
+  @Post('replies/:id/vote/:value')
+  voteReply(@Req() req: any, @Param('id') id: string, @Param('value') value: string) {
+    const normalized = value.toUpperCase();
+    if (normalized !== 'UP' && normalized !== 'DOWN') {
+      throw new BadRequestException("vote value must be 'up' or 'down'");
+    }
+    return this.chatService.voteReply(id, req.user.userId, normalized);
   }
 }

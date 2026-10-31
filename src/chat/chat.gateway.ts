@@ -8,10 +8,11 @@ import {
   MessageBody,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import jwt from 'jsonwebtoken';
 import { ChatService } from './chat.service.js';
 import { GroupsService } from './groups.service.js';
+import { DirectMessagesService } from './direct-messages.service.js';
 
 interface AuthedSocket extends Socket {
   data: { userId: string; role: string };
@@ -35,6 +36,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private chatService: ChatService,
     private groupsService: GroupsService,
+    @Inject(forwardRef(() => DirectMessagesService)) private directMessages: DirectMessagesService,
   ) {}
 
   // Same JWT used for REST auth (see jwt.strategy.ts) - socket.io has no
@@ -95,6 +97,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`conversation:${conversationId}`).emit('conversation:message', message);
   }
 
+  // ───────────────────────── Direct (peer-to-peer) messages ─────────────────────────
+
+  @SubscribeMessage('direct:join')
+  async joinDirectConversation(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() data: { conversationId: string },
+  ) {
+    await this.directMessages.getMessages(data.conversationId, client.data.userId);
+    client.join(`direct:${data.conversationId}`);
+    return { ok: true };
+  }
+
+  @SubscribeMessage('direct:leave')
+  leaveDirectConversation(
+    @ConnectedSocket() client: AuthedSocket,
+    @MessageBody() data: { conversationId: string },
+  ) {
+    client.leave(`direct:${data.conversationId}`);
+    return { ok: true };
+  }
+
+  emitNewDirectMessage(conversationId: string, message: unknown) {
+    this.server.to(`direct:${conversationId}`).emit('direct:message', message);
+  }
+
   // ───────────────────────── Group topics ─────────────────────────
 
   @SubscribeMessage('topic:join')
@@ -136,5 +163,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   emitNewReply(organizationId: string, reply: unknown) {
     this.server.to(`shop:${organizationId}`).emit('shop:reply', reply);
+  }
+
+  emitReplyScoreChanged(organizationId: string, replyId: string, score: number) {
+    this.server.to(`shop:${organizationId}`).emit('shop:reply-score', { replyId, score });
   }
 }

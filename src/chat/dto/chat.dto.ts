@@ -31,3 +31,21 @@ export class ReplyQuestionDto {
   @MaxLength(2000)
   body!: string;
 }
+
+export class SendDirectMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(4000)
+  body!: string;
+}
+
+export class StartDirectConversationDto {
+  @IsString()
+  @IsNotEmpty()
+  recipientId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(4000)
+  body!: string;
+}
