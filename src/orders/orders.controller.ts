@@ -16,6 +16,8 @@ import {
   VerifyPaymentDto,
 } from './dto/order.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/roles.guard.js';
+import { Roles } from '../auth/roles.decorator.js';
 
 @Controller('orders')
 @UseGuards(JwtAuthGuard)
@@ -135,5 +137,30 @@ export class OrdersController {
       body.decision,
       body.note,
     );
+  }
+
+  // Escrow: buyer confirms they genuinely received a completed order.
+  // Required before an admin can release escrowed funds to the vendor
+  // (unless the admin force-overrides for an unresponsive buyer).
+  @Post(':id/confirm-delivery')
+  confirmDelivery(@Req() req: any, @Param('id') id: string) {
+    return this.ordersService.confirmDelivery(id, req.user.userId);
+  }
+
+  // Escrow: releases wallet funds held for this order to the vendor.
+  // ADMIN-ONLY, enforced server-side by RolesGuard (not just hidden in
+  // the UI) - a buyer or vendor hitting this endpoint directly gets a
+  // 403, regardless of what the frontend shows them. This is the real
+  // security boundary for escrow: no client-side control decides who can
+  // move money, only this guard does.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id/release-escrow')
+  releaseEscrow(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { force?: boolean },
+  ) {
+    return this.ordersService.releaseEscrow(id, req.user.userId, !!body?.force);
   }
 }

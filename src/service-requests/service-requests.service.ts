@@ -179,6 +179,14 @@ export class ServiceRequestsService {
       throw new ForbiddenException('Only the provider can do that');
     }
 
+    // Security: escrow money already paid out to the provider can't be
+    // clawed back by just flipping the status.
+    if (next === 'CANCELLED' && request.escrowStatus === 'RELEASED') {
+      throw new BadRequestException(
+        'This booking has already been paid out to the provider and cannot be cancelled this way - contact support',
+      );
+    }
+
     const updated = await this.prisma.serviceRequest.update({
       where: { id },
       data: {
@@ -187,7 +195,71 @@ export class ServiceRequestsService {
       },
       include: { buyer: { select: SAFE_BUYER_SELECT }, organization: true },
     });
+
+    // Wallet-paid bookings held in escrow get their credit refunded back
+    // to the buyer's wallet if cancelled before the provider was ever
+    // actually paid out.
+    if (next === 'CANCELLED' && request.escrowStatus === 'HELD' && request.quotedPrice) {
+      await this.wallets.refund(request.buyerId, Number(request.quotedPrice), { serviceRequestId: id });
+      await this.prisma.serviceRequest.update({
+        where: { id },
+        data: { escrowStatus: 'REFUNDED' },
+      });
+    }
+
     return updated;
+  }
+
+  // Buyer-only: confirms they genuinely received the completed service.
+  // Required signal before an admin can release escrowed funds - a
+  // provider marking their own job COMPLETED is not sufficient proof the
+  // buyer was actually satisfied.
+  async confirmCompletion(id: string, buyerId: string) {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!request) throw new NotFoundException('Service request not found');
+    if (request.buyerId !== buyerId) {
+      throw new ForbiddenException('This is not your booking');
+    }
+    if (request.status !== 'COMPLETED') {
+      throw new BadRequestException('You can only confirm a booking that has been marked completed');
+    }
+    if (request.escrowStatus !== 'HELD') {
+      throw new BadRequestException('This booking has no escrow payment to confirm');
+    }
+    return this.prisma.serviceRequest.update({
+      where: { id },
+      data: { buyerConfirmedAt: new Date() },
+    });
+  }
+
+  // Releases escrowed wallet funds to the provider - admin-only, same
+  // security boundary and force-override semantics as Orders.releaseEscrow.
+  async releaseEscrow(id: string, adminId: string, force = false) {
+    const request = await this.prisma.serviceRequest.findUnique({ where: { id } });
+    if (!request) throw new NotFoundException('Service request not found');
+    if (request.escrowStatus !== 'HELD') {
+      throw new BadRequestException(
+        `This booking's escrow is ${request.escrowStatus}, not HELD - nothing to release`,
+      );
+    }
+    if (request.status !== 'COMPLETED') {
+      throw new BadRequestException(
+        'Escrow can only be released once the booking is marked COMPLETED',
+      );
+    }
+    if (!request.buyerConfirmedAt && !force) {
+      throw new BadRequestException(
+        'The buyer has not confirmed completion yet - wait for their confirmation, or pass force=true to override as admin',
+      );
+    }
+    return this.prisma.serviceRequest.update({
+      where: { id },
+      data: {
+        escrowStatus: 'RELEASED',
+        escrowReleasedAt: new Date(),
+        escrowReleasedById: adminId,
+      },
+    });
   }
 
   // Same manual-payment-proof pattern as regular orders - buyer pays the
@@ -215,7 +287,15 @@ export class ServiceRequestsService {
         await tx.walletTransaction.update({ where: { id: txnId }, data: { serviceRequestId: id } });
         return tx.serviceRequest.update({
           where: { id },
-          data: { paymentMethod: 'WALLET', paymentVerification: 'VERIFIED', paymentVerifiedAt: new Date() },
+          data: {
+            paymentMethod: 'WALLET',
+            paymentVerification: 'VERIFIED',
+            paymentVerifiedAt: new Date(),
+            // Escrow applies only to wallet payments - see the
+            // EscrowStatus schema comment for the full rationale.
+            escrowStatus: 'HELD',
+            escrowHeldAt: new Date(),
+          },
         });
       });
     }

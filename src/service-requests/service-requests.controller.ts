@@ -16,6 +16,8 @@ import {
   SubmitServicePaymentProofDto,
 } from './dto/service-request.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/roles.guard.js';
+import { Roles } from '../auth/roles.decorator.js';
 
 @Controller('service-requests')
 @UseGuards(JwtAuthGuard)
@@ -73,5 +75,25 @@ export class ServiceRequestsController {
     @Body() body: { verification: 'VERIFIED' | 'REJECTED' },
   ) {
     return this.service.verifyPayment(id, req.user.userId, req.user.role, body.verification);
+  }
+
+  // Escrow: buyer confirms they genuinely received the completed service.
+  @Post(':id/confirm-completion')
+  confirmCompletion(@Req() req: any, @Param('id') id: string) {
+    return this.service.confirmCompletion(id, req.user.userId);
+  }
+
+  // Escrow: releases wallet funds held for this booking to the provider.
+  // ADMIN-ONLY, enforced server-side - same security boundary as the
+  // Orders equivalent.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id/release-escrow')
+  releaseEscrow(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { force?: boolean },
+  ) {
+    return this.service.releaseEscrow(id, req.user.userId, !!body?.force);
   }
 }

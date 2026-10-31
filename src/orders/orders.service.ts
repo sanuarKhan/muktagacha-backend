@@ -153,6 +153,12 @@ export class OrdersService {
               : dto.paymentMethod === 'WALLET'
                 ? 'VERIFIED'
                 : 'PENDING_VERIFICATION',
+          // Escrow only ever applies to wallet payments - see the
+          // EscrowStatus schema comment for the full rationale. Every
+          // other payment method goes straight to the vendor, so escrow
+          // is simply not applicable to it.
+          escrowStatus: dto.paymentMethod === 'WALLET' ? 'HELD' : 'NOT_APPLICABLE',
+          escrowHeldAt: dto.paymentMethod === 'WALLET' ? new Date() : undefined,
           items: { create: itemsWithPrice },
         },
         include: {
@@ -403,6 +409,16 @@ export class OrdersService {
       );
     }
 
+    // Security: escrow money that was already paid out to the vendor
+    // can't be clawed back by just flipping the order status - a vendor
+    // who was genuinely paid shouldn't have their payout silently undone
+    // by a later cancellation click.
+    if (dto.status === 'CANCELLED' && order.escrowStatus === 'RELEASED') {
+      throw new BadRequestException(
+        'This order has already been paid out to the vendor and cannot be cancelled this way - contact support',
+      );
+    }
+
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: dto.status },
@@ -417,10 +433,86 @@ export class OrdersService {
     // cancelled sale shouldn't permanently reduce the shop's inventory.
     if (dto.status === 'CANCELLED' && order.status !== 'CANCELLED') {
       await this.restoreStock(orderId);
+      // Wallet-paid orders held in escrow get their credit refunded back
+      // to the buyer's wallet (never cash, consistent with the wallet's
+      // closed-loop rule) - the vendor was never actually paid since the
+      // money was sitting in escrow, not yet released.
+      if (order.escrowStatus === 'HELD') {
+        const orderTotal = updated.items.reduce(
+          (sum, it) => sum + Number(it.price) * it.quantity, 0,
+        );
+        await this.wallets.refund(order.buyerId, orderTotal, { orderId });
+        await this.prisma.order.update({
+          where: { id: orderId },
+          data: { escrowStatus: 'REFUNDED' },
+        });
+      }
     }
 
     await this.notifications.notifyOrderStatusChanged(updated);
     return updated;
+  }
+
+  // Buyer-only: confirms they genuinely received/are satisfied with a
+  // completed, wallet-paid order. This is the real signal escrow release
+  // is meant to wait for - a vendor marking their own order COMPLETED is
+  // not sufficient proof the buyer actually got what they paid for.
+  async confirmDelivery(orderId: string, buyerId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.buyerId !== buyerId) {
+      throw new ForbiddenException('This is not your order');
+    }
+    if (order.status !== 'COMPLETED') {
+      throw new BadRequestException('You can only confirm an order that has been marked completed');
+    }
+    if (order.escrowStatus !== 'HELD') {
+      throw new BadRequestException('This order has no escrow payment to confirm');
+    }
+    return this.prisma.order.update({
+      where: { id: orderId },
+      data: { buyerConfirmedAt: new Date() },
+    });
+  }
+
+  // Releases escrowed wallet funds to the vendor - a manual admin action
+  // recording that the vendor was actually paid out (e.g. the admin sent
+  // them a real bKash transfer for the held amount). Deliberately NOT
+  // self-service for either side: a buyer can't release their own
+  // escrow (they'd have no incentive to ever do it honestly once goods
+  // are in hand), and a vendor can't release it themselves (defeats the
+  // entire point of escrow as buyer protection). Requires the buyer to
+  // have confirmed delivery first (real signal, not the vendor's own
+  // say-so) - force=true lets an admin override that for a genuinely
+  // unresponsive buyer, but every override is logged via
+  // escrowReleasedById so it's always traceable to a specific admin
+  // decision, not a silent bypass.
+  async releaseEscrow(orderId: string, adminId: string, force = false) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    if (order.escrowStatus !== 'HELD') {
+      throw new BadRequestException(
+        `This order's escrow is ${order.escrowStatus}, not HELD - nothing to release`,
+      );
+    }
+    if (order.status !== 'COMPLETED') {
+      throw new BadRequestException(
+        'Escrow can only be released once the order is marked COMPLETED (delivered)',
+      );
+    }
+    if (!order.buyerConfirmedAt && !force) {
+      throw new BadRequestException(
+        'The buyer has not confirmed receipt yet - wait for their confirmation, or pass force=true to override as admin',
+      );
+    }
+    return this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        escrowStatus: 'RELEASED',
+        escrowReleasedAt: new Date(),
+        escrowReleasedById: adminId,
+      },
+    });
   }
 
   // Buyer submits proof of payment (TrxID) after paying the vendor's

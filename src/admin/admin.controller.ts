@@ -125,4 +125,37 @@ export class AdminController {
       },
     });
   }
+
+  // Escrow review queue - every wallet-paid order/booking currently
+  // holding funds in escrow, for the admin to release once the buyer has
+  // confirmed (or force-release via the order/service-request endpoint
+  // for an unresponsive buyer). Read-only list here; the actual
+  // release action lives on the Orders/ServiceRequests controllers
+  // (keeps the money-moving code colocated with its own guards/logic
+  // rather than duplicated here).
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Get('escrow')
+  async escrowQueue() {
+    const [orders, serviceRequests] = await Promise.all([
+      this.prisma.order.findMany({
+        where: { escrowStatus: 'HELD' },
+        include: {
+          buyer: { select: { id: true, fullName: true, phone: true } },
+          organization: { select: { id: true, name: true } },
+          items: true,
+        },
+        orderBy: { escrowHeldAt: 'asc' },
+      }),
+      this.prisma.serviceRequest.findMany({
+        where: { escrowStatus: 'HELD' },
+        include: {
+          buyer: { select: { id: true, fullName: true, phone: true } },
+          organization: { select: { id: true, name: true } },
+        },
+        orderBy: { escrowHeldAt: 'asc' },
+      }),
+    ]);
+    return { orders, serviceRequests };
+  }
 }

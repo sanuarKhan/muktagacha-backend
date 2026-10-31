@@ -67,6 +67,27 @@ enum PaymentVerificationStatus {
   REJECTED
 }
 
+// Escrow is only meaningful where the platform actually controls the
+// money. bKash/Nagad/SkodePay payments in this system all go STRAIGHT TO
+// THE VENDOR (SkodePay uses the vendor's own API key) - the platform
+// never holds that cash, so it cannot honestly "release" it later. Wallet
+// payments are the one case where the platform genuinely holds a real
+// balance (built from verified bKash/Nagad topups), so escrow applies
+// ONLY to WALLET-paid orders/bookings: the spend already happened at
+// wallet.spend(), but the money is held in an escrow ledger rather than
+// paid out to the vendor immediately. Release is a manual admin action
+// (recording that the vendor was actually paid out, e.g. by sending them
+// a real bKash transfer) that happens once the buyer confirms delivery/
+// completion - exactly the buyer-protection behavior the plan asked for,
+// honestly scoped to where it's technically real instead of faked for
+// payment methods the platform never touched.
+enum EscrowStatus {
+  NOT_APPLICABLE // non-wallet payment - money went straight to the vendor, no escrow possible
+  HELD // wallet payment received, held pending delivery/completion confirmation
+  RELEASED // buyer confirmed, admin has paid the vendor out
+  REFUNDED // order/booking was cancelled - wallet credit was refunded to the buyer instead
+}
+
 enum PrescriptionStatus {
   NOT_REQUIRED
   PENDING_UPLOAD
@@ -111,6 +132,8 @@ model User {
   shopReviewsAsBuyer     ShopReview[]         @relation("ShopReviewsAsBuyer")
   wallet                 Wallet?
   walletTopupsReviewed   WalletTopup[]        @relation("WalletTopupsReviewed")
+  escrowOrdersReleased   Order[]              @relation("EscrowReleasedByAdmin")
+  escrowServiceRequestsReleased ServiceRequest[] @relation("ServiceEscrowReleasedByAdmin")
 
   @@index([area, ward])
   @@map("users")
@@ -331,6 +354,21 @@ model Order {
   paymentTrxId          String?
   paymentVerification   PaymentVerificationStatus @default(NOT_SUBMITTED)
   paymentVerifiedAt     DateTime?
+
+  // Escrow - ONLY ever meaningful when paymentMethod = WALLET (see the
+  // EscrowStatus enum comment for why). Defaults to NOT_APPLICABLE for
+  // every other payment method and is never touched for them.
+  escrowStatus   EscrowStatus @default(NOT_APPLICABLE)
+  escrowHeldAt   DateTime?
+  escrowReleasedAt DateTime?
+  escrowReleasedById String?
+  escrowReleasedBy   User?   @relation("EscrowReleasedByAdmin", fields: [escrowReleasedById], references: [id])
+  // Buyer's own confirmation that the order genuinely arrived/was
+  // fulfilled - a real security boundary, not just the vendor's own
+  // say-so. An admin can still release without this if the buyer goes
+  // unresponsive (manual override, logged via escrowReleasedById), but
+  // this is the honest signal escrow release is meant to wait for.
+  buyerConfirmedAt DateTime?
 
   // Local delivery assignment. Muktagacha has no national courier API -
   // riders are real people the admin/vendor hires directly, assigned
@@ -815,6 +853,15 @@ model ServiceRequest {
   updatedAt DateTime @updatedAt
   completedAt DateTime?
   shopReview ShopReview?
+
+  // Same WALLET-only escrow scheme as Order - see the EscrowStatus enum
+  // comment above for the full rationale.
+  escrowStatus       EscrowStatus @default(NOT_APPLICABLE)
+  escrowHeldAt       DateTime?
+  escrowReleasedAt   DateTime?
+  escrowReleasedById String?
+  escrowReleasedBy   User?        @relation("ServiceEscrowReleasedByAdmin", fields: [escrowReleasedById], references: [id])
+  buyerConfirmedAt   DateTime?
 
   @@index([buyerId])
   @@index([organizationId, status])
