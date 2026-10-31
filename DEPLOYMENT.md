@@ -54,3 +54,47 @@
 - No password reset flow yet (Phase 1 scope was login/register only — add this before wide public use)
 - No payment verification for bKash/Nagad yet — Phase 1 is "enter payment method, vendor collects manually" by design, matching the trust-first sequencing from the plan
 - No rate limiting on the API yet — fine for an initial small-town launch, worth adding before any wider marketing push
+
+## 6. Chat system (buyer↔vendor messaging, shop Q&A, community groups)
+
+Added: private 1:1 buyer-vendor conversations, a public per-shop Q&A board, and
+user-created community groups with Discord-style topics — all real-time via
+Socket.IO, backed by Postgres (not an in-memory/ephemeral store).
+
+**Why Socket.IO + Railway, not Vercel serverless functions:** WebSocket
+connections need a long-lived process — a serverless function (Vercel) can't
+hold one open. Railway already runs the backend as a persistent Node process,
+so this was free to add with zero new infrastructure or hosting cost. If the
+backend ever moves to a serverless host, the real-time layer would need to
+move to a managed service (Pusher, Ably, or Supabase Realtime) instead — flag
+this if that migration is ever discussed.
+
+**Cost at current scale**: $0 extra. Same Railway dyno, same Supabase
+Postgres, no new paid service. Socket.IO's own Redis-adapter scaling (needed
+only once you run multiple backend instances behind a load balancer) is not
+set up — single Railway instance can comfortably hold several thousand
+concurrent idle sockets before that becomes necessary.
+
+**Known shortcuts taken (documented, not hidden) — things to revisit before
+heavy usage:**
+- No message pagination yet — a conversation's full history loads in one
+  request. Fine for the expected volume of a small-town buyer-vendor chat,
+  but would need a `cursor`/`limit` param before any thread grows into the
+  thousands of messages.
+- No image/file attachments in chat — text only for now (same trust-first,
+  smallest-working-version sequencing as the rest of Phase 1).
+- No push notifications when the browser tab is closed — a message only
+  shows up in the floating widget's unread badge while the site is open.
+  Real push (web push API, or an SMS fallback via the existing httpSMS
+  integration) is a natural Phase 2 add once there's real usage to justify it.
+- Group moderation is minimal (owner can't remove members or delete posts
+  yet) — acceptable for an initial trust-based local-community launch, not
+  acceptable once the community grows past people who know each other.
+- The public Shop Q&A board has no spam/abuse controls (rate limiting,
+  reporting) — same reasoning: fine for a small early user base, a real gap
+  once the shop list grows.
+
+None of the above block the MVP from working correctly for its actual first
+users — they're the deliberate "smallest version that's honestly useful"
+cuts, listed here so they're a visible backlog, not a silent gap discovered
+later.

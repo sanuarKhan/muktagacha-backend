@@ -68,6 +68,15 @@ model User {
   deliveriesAsRider Order[] @relation("RiderDeliveries")
   riderProfile  RiderProfile?
 
+  conversationsAsBuyer Conversation[]      @relation("ConversationsAsBuyer")
+  messagesSent         Message[]           @relation("MessagesSent")
+  shopQuestionsAsked   ShopQuestion[]      @relation("QuestionsAsked")
+  shopQuestionReplies  ShopQuestionReply[] @relation("QuestionRepliesAuthored")
+  groupsCreated        Group[]             @relation("GroupsCreated")
+  groupMemberships     GroupMember[]       @relation("GroupMemberships")
+  groupTopicsCreated   GroupTopic[]        @relation("GroupTopicsCreated")
+  groupPostsAuthored   GroupPost[]         @relation("GroupPostsAuthored")
+
   @@index([area, ward])
   @@map("users")
 }
@@ -122,6 +131,8 @@ model Organization {
   orders    Order[]
   marketingContacts  MarketingContact[]
   marketingCampaigns MarketingCampaign[]
+  conversations      Conversation[]
+  shopQuestions      ShopQuestion[]
 
   @@index([ownerUserId])
   @@index([area, ward, vertical])
@@ -351,4 +362,164 @@ model DeliveryRating {
 
   @@index([riderId])
   @@map("delivery_ratings")
+}
+
+// =============================================================================
+// CHAT SYSTEM
+// =============================================================================
+// Two separate surfaces, matching the real-world rule the business wants:
+//   1. Public shop Q&A board — anyone can post a question on a vendor's
+//      storefront page; the vendor (or anyone) can reply; visible to all
+//      visitors. This is the "common place where everyone can chat" / local
+//      community discussion board under each shop.
+//   2. Private conversation — a 1:1 thread between ONE buyer and ONE vendor
+//      organization. Enforced rule: only a BUYER can create a new
+//      conversation (open the first message to a shop). A vendor can only
+//      reply inside conversations that already exist — they can never
+//      initiate a new conversation to a buyer who hasn't messaged first.
+//      This is enforced in the service layer (ChatService.sendMessage),
+//      not just the UI, since a malicious/careless vendor account could
+//      otherwise call the API directly.
+// =============================================================================
+
+model Conversation {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  buyerId        String
+  buyer          User         @relation("ConversationsAsBuyer", fields: [buyerId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  messages Message[]
+
+  // One conversation per (shop, buyer) pair — reopening a chat with the
+  // same shop continues the existing thread rather than forking a new one.
+  @@unique([organizationId, buyerId])
+  @@index([organizationId])
+  @@index([buyerId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation("MessagesSent", fields: [senderId], references: [id])
+  body           String       @db.Text
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// Public board: one question per row, with its own flat list of replies.
+// Kept deliberately simple (flat replies, no nested threading) since this
+// is a small-town local marketplace, not a forum — depth adds UI complexity
+// with little real benefit at this scale.
+model ShopQuestion {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  askerId        String
+  asker          User         @relation("QuestionsAsked", fields: [askerId], references: [id])
+  body           String       @db.Text
+  createdAt      DateTime     @default(now())
+
+  replies ShopQuestionReply[]
+
+  @@index([organizationId, createdAt])
+  @@map("shop_questions")
+}
+
+model ShopQuestionReply {
+  id         String       @id @default(uuid())
+  questionId String
+  question   ShopQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User         @relation("QuestionRepliesAuthored", fields: [authorId], references: [id])
+  body       String       @db.Text
+  createdAt  DateTime     @default(now())
+
+  @@index([questionId, createdAt])
+  @@map("shop_question_replies")
+}
+
+// =============================================================================
+// COMMUNITY GROUPS — Discord-style: any user can create a group (e.g. "Bazar
+// Road Residents", "Bike Buy/Sell Mukta"), each group has its own topics
+// (channels), members join/leave freely, anyone in the group can post in any
+// of its topics. This is the broader "build the local community" layer,
+// separate from and in addition to the per-shop Q&A board and private
+// buyer-vendor chat above — groups are not tied to any one vendor.
+// =============================================================================
+
+model Group {
+  id          String   @id @default(uuid())
+  name        String
+  description String?  @db.Text
+  area        String?
+  ward        String?
+  creatorId   String
+  creator     User     @relation("GroupsCreated", fields: [creatorId], references: [id])
+  createdAt   DateTime @default(now())
+
+  members GroupMember[]
+  topics  GroupTopic[]
+
+  @@index([area, ward])
+  @@map("groups")
+}
+
+enum GroupRole {
+  OWNER
+  MODERATOR
+  MEMBER
+}
+
+model GroupMember {
+  id       String    @id @default(uuid())
+  groupId  String
+  group    Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User      @relation("GroupMemberships", fields: [userId], references: [id])
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+// A "topic" is a channel within a group (Discord-style: one group, many
+// topics members can post under — e.g. "General", "Buy & Sell", "Events").
+model GroupTopic {
+  id        String   @id @default(uuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name      String
+  creatorId String
+  creator   User     @relation("GroupTopicsCreated", fields: [creatorId], references: [id])
+  createdAt DateTime @default(now())
+
+  posts GroupPost[]
+
+  @@unique([groupId, name])
+  @@index([groupId])
+  @@map("group_topics")
+}
+
+model GroupPost {
+  id        String     @id @default(uuid())
+  topicId   String
+  topic     GroupTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User       @relation("GroupPostsAuthored", fields: [authorId], references: [id])
+  body      String     @db.Text
+  createdAt DateTime   @default(now())
+
+  @@index([topicId, createdAt])
+  @@map("group_posts")
 }

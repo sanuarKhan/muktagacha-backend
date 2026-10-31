@@ -15,6 +15,7 @@ import { CryptoModule } from './crypto/crypto.module.js';
 import { CloudinaryModule } from './cloudinary/cloudinary.module.js';
 import { MarketingModule } from './marketing/marketing.module.js';
 import { RidersModule } from './riders/riders.module.js';
+import { ChatModule } from './chat/chat.module.js';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { RidersModule } from './riders/riders.module.js';
     CloudinaryModule,
     MarketingModule,
     RidersModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],
