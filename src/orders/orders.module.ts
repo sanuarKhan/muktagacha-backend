@@ -3,9 +3,10 @@ import { OrdersService } from './orders.service.js';
 import { OrdersController } from './orders.controller.js';
 import { SkodePayModule } from '../skodepay/skodepay.module.js';
 import { FraudModule } from '../fraud/fraud.module.js';
+import { WalletsModule } from '../wallets/wallets.module.js';
 
 @Module({
-  imports: [SkodePayModule, FraudModule],
+  imports: [SkodePayModule, FraudModule, WalletsModule],
   controllers: [OrdersController],
   providers: [OrdersService],
 })

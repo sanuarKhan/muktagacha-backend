@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { WalletsService } from '../wallets/wallets.service.js';
 import {
   CreateServiceRequestDto,
   QuoteServiceRequestDto,
@@ -26,6 +27,7 @@ export class ServiceRequestsService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private wallets: WalletsService,
   ) {}
 
   async create(buyerId: string, dto: CreateServiceRequestDto) {
@@ -189,8 +191,8 @@ export class ServiceRequestsService {
   }
 
   // Same manual-payment-proof pattern as regular orders - buyer pays the
-  // provider's bKash/Nagad number (or cash) AFTER the work is done, since
-  // the price wasn't known upfront.
+  // provider's bKash/Nagad number (or cash, or wallet credit) AFTER the
+  // work is done, since the price wasn't known upfront.
   async submitPayment(id: string, buyerId: string, dto: SubmitServicePaymentProofDto) {
     const request = await this.prisma.serviceRequest.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Service request not found');
@@ -198,6 +200,26 @@ export class ServiceRequestsService {
     if (request.status !== 'COMPLETED') {
       throw new BadRequestException('Payment can only be submitted once the job is completed');
     }
+    if (request.paymentMethod) {
+      throw new BadRequestException('Payment was already submitted for this booking');
+    }
+
+    if (dto.paymentMethod === 'WALLET') {
+      if (!request.quotedPrice) {
+        throw new BadRequestException('No quoted price to pay');
+      }
+      return this.prisma.$transaction(async (tx) => {
+        const txnId = await this.wallets.spend(tx, buyerId, Number(request.quotedPrice), {
+          serviceRequestId: id,
+        });
+        await tx.walletTransaction.update({ where: { id: txnId }, data: { serviceRequestId: id } });
+        return tx.serviceRequest.update({
+          where: { id },
+          data: { paymentMethod: 'WALLET', paymentVerification: 'VERIFIED', paymentVerifiedAt: new Date() },
+        });
+      });
+    }
+
     return this.prisma.serviceRequest.update({
       where: { id },
       data: {

@@ -53,6 +53,7 @@ enum PaymentMethod {
   BKASH
   NAGAD
   SKODEPAY
+  WALLET
 }
 
 // Buyer submits a TrxID after paying the vendor's bKash/Nagad number
@@ -107,6 +108,9 @@ model User {
   fraudFlagsReviewed     FraudFlag[]          @relation("FraudFlagsReviewed")
   prescriptionsReviewed  Order[]              @relation("PrescriptionsReviewed")
   serviceRequestsAsBuyer ServiceRequest[]     @relation("ServiceRequestsAsBuyer")
+  shopReviewsAsBuyer     ShopReview[]         @relation("ShopReviewsAsBuyer")
+  wallet                 Wallet?
+  walletTopupsReviewed   WalletTopup[]        @relation("WalletTopupsReviewed")
 
   @@index([area, ward])
   @@map("users")
@@ -172,6 +176,13 @@ model Organization {
   skodePayApiKeyEnc String? @db.Text
   skodePayEnabled   Boolean @default(false)
 
+  // Denormalized rating counters (same pattern as RiderProfile.avgRating
+  // below) - cheap reads on every shop card/listing instead of an
+  // aggregate query every time. Recomputed whenever a new ShopReview is
+  // created.
+  avgRating   Decimal? @db.Decimal(3, 2)
+  reviewCount Int      @default(0)
+
   listings  Product[]
   orders    Order[]
   marketingContacts  MarketingContact[]
@@ -179,6 +190,7 @@ model Organization {
   conversations      Conversation[]
   shopQuestions      ShopQuestion[]
   serviceRequests    ServiceRequest[]
+  shopReviews        ShopReview[]
 
   @@index([ownerUserId])
   @@index([area, ward, vertical])
@@ -346,6 +358,7 @@ model Order {
 
   items OrderItem[]
   fraudFlags FraudFlag[]
+  shopReview ShopReview?
 
   @@index([buyerId])
   @@index([recipientId])
@@ -801,8 +814,124 @@ model ServiceRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   completedAt DateTime?
+  shopReview ShopReview?
 
   @@index([buyerId])
   @@index([organizationId, status])
   @@map("service_requests")
+}
+
+// =============================================================================
+// SHOP RATINGS & REVIEWS (Phase 1.5)
+// =============================================================================
+// One review per completed transaction, left by the buyer - exactly the
+// RiderProfile/DeliveryRating pattern already proven elsewhere in this
+// schema, applied to shops instead of individual riders. A buyer can
+// review via either path they actually used: a completed Order
+// (Marketplace/Pharmacy) or a completed ServiceRequest (Services) -
+// orderId/serviceRequestId are both optional but exactly one must be set
+// (enforced in the service layer, not the DB, since Postgres has no
+// native "exactly one of these two columns" constraint). Organization.
+// avgRating/reviewCount are recomputed whenever a new review lands.
+model ShopReview {
+  id              String          @id @default(uuid())
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id])
+  buyerId         String
+  buyer           User            @relation("ShopReviewsAsBuyer", fields: [buyerId], references: [id])
+  orderId         String?         @unique
+  order           Order?          @relation(fields: [orderId], references: [id])
+  serviceRequestId String?        @unique
+  serviceRequest  ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+  rating          Int // 1-5
+  comment         String?         @db.Text
+  createdAt       DateTime        @default(now())
+
+  @@index([organizationId])
+  @@map("shop_reviews")
+}
+
+// =============================================================================
+// CLOSED-LOOP WALLET (Phase 1.5)
+// =============================================================================
+// A user buys wallet credit with real bKash/Nagad money (manual-proof
+// verification, same pattern as every other payment in this system), then
+// spends that credit anywhere on the platform. CRITICAL legal constraint
+// from the plan: credit can NEVER be withdrawn back to cash and can NEVER
+// be transferred person-to-person - this is what keeps it a simple
+// closed-loop store-credit system (legal in Bangladesh, no banking
+// license needed) rather than an e-money/payment-instrument product
+// (which would require Bangladesh Bank licensing) or something resembling
+// a cryptocurrency (explicitly out of scope per the founder's own
+// correct call). The service layer enforces this by simply never
+// offering a withdraw/transfer-out code path - there is no "send to
+// another user" or "cash out" method anywhere in WalletsService.
+enum WalletTopupStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+}
+
+enum WalletTransactionType {
+  TOPUP // money in - admin-verified bKash/Nagad topup
+  SPEND // money out - paid for an order or service request
+  REFUND // money back in - an order/booking paid by wallet was cancelled
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  // Denormalized running balance, same reasoning as every other
+  // denormalized counter in this schema - transactions are the source of
+  // truth (balance = sum of all WalletTransaction.amount for this
+  // wallet), this column just avoids an aggregate query on every
+  // checkout page load.
+  balance   Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  transactions WalletTransaction[]
+  topups       WalletTopup[]
+
+  @@map("wallets")
+}
+
+// Buyer requests to add credit - submits a TrxID for a bKash/Nagad
+// payment made to the PLATFORM's own number (not a vendor's), admin
+// verifies it, credit is added to the wallet only on verification. Same
+// manual-proof pattern as every vendor payment in this system - no real
+// payment gateway integration needed for Phase 1.5.
+model WalletTopup {
+  id         String            @id @default(uuid())
+  walletId   String
+  wallet     Wallet            @relation(fields: [walletId], references: [id])
+  amount     Decimal           @db.Decimal(10, 2)
+  method     PaymentMethod // BKASH or NAGAD in practice - CASH_ON_DELIVERY/SKODEPAY/WALLET make no sense here but reusing the one enum avoids a redundant second one
+  trxId      String?
+  status     WalletTopupStatus @default(PENDING_VERIFICATION)
+  reviewedAt DateTime?
+  reviewedById String?
+  reviewedBy   User?           @relation("WalletTopupsReviewed", fields: [reviewedById], references: [id])
+  createdAt  DateTime          @default(now())
+
+  @@index([walletId, status])
+  @@map("wallet_topups")
+}
+
+// Immutable ledger entry - every balance change is a row here, never a
+// direct balance edit outside the service layer's recompute step. amount
+// is signed: positive for TOPUP/REFUND, negative for SPEND.
+model WalletTransaction {
+  id          String                @id @default(uuid())
+  walletId    String
+  wallet      Wallet                @relation(fields: [walletId], references: [id])
+  type        WalletTransactionType
+  amount      Decimal               @db.Decimal(10, 2)
+  orderId     String?
+  serviceRequestId String?
+  note        String?               @db.Text
+  createdAt   DateTime              @default(now())
+
+  @@index([walletId])
+  @@map("wallet_transactions")
 }

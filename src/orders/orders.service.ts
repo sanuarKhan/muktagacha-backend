@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { SkodePayService } from '../skodepay/skodepay.service.js';
 import { FraudDetectionService } from '../fraud/fraud-detection.service.js';
+import { WalletsService } from '../wallets/wallets.service.js';
 import {
   CreateOrderDto,
   UpdateOrderStatusDto,
@@ -26,6 +27,7 @@ export class OrdersService {
     private notifications: NotificationsService,
     private skodePay: SkodePayService,
     private fraudDetection: FraudDetectionService,
+    private wallets: WalletsService,
   ) {}
 
   // Price comes from the server's own Product/ProductVariant record, NEVER
@@ -115,7 +117,19 @@ export class OrdersService {
         });
       }
 
-      return tx.order.create({
+      const orderTotal = itemsWithPrice.reduce((sum, it) => sum + it.price * it.quantity, 0);
+
+      // Wallet payment is settled immediately and atomically inside this
+      // same transaction - either the balance covers it and both the
+      // spend and the order are created together, or neither happens
+      // (BadRequestException rolls back the whole transaction, including
+      // the stock decrements above).
+      let walletTxnId: string | undefined;
+      if (dto.paymentMethod === 'WALLET') {
+        walletTxnId = await this.wallets.spend(tx, buyerId, orderTotal, {});
+      }
+
+      const created = await tx.order.create({
         data: {
           buyerId,
           organizationId: dto.organizationId,
@@ -131,11 +145,14 @@ export class OrdersService {
           requiresPrescription,
           prescriptionStatus: requiresPrescription ? 'PENDING_UPLOAD' : 'NOT_REQUIRED',
           // Manual-MFS orders need a TrxID before the vendor will confirm
-          // them; cash orders have nothing to verify.
+          // them; cash orders have nothing to verify; wallet payment is
+          // already confirmed money the instant the spend above succeeds.
           paymentVerification:
             dto.paymentMethod === 'CASH_ON_DELIVERY'
               ? 'NOT_SUBMITTED'
-              : 'PENDING_VERIFICATION',
+              : dto.paymentMethod === 'WALLET'
+                ? 'VERIFIED'
+                : 'PENDING_VERIFICATION',
           items: { create: itemsWithPrice },
         },
         include: {
@@ -145,6 +162,18 @@ export class OrdersService {
           organization: true,
         },
       });
+
+      // Backfill the orderId onto the wallet-spend ledger entry now that
+      // the order actually exists - keeps the ledger fully traceable
+      // back to what was bought.
+      if (walletTxnId) {
+        await tx.walletTransaction.update({
+          where: { id: walletTxnId },
+          data: { orderId: created.id },
+        });
+      }
+
+      return created;
     });
 
     await this.notifications.notifyOrderCreated(order);

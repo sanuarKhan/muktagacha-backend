@@ -17,6 +17,8 @@ import { MarketingModule } from './marketing/marketing.module.js';
 import { RidersModule } from './riders/riders.module.js';
 import { ChatModule } from './chat/chat.module.js';
 import { ServiceRequestsModule } from './service-requests/service-requests.module.js';
+import { ReviewsModule } from './reviews/reviews.module.js';
+import { WalletsModule } from './wallets/wallets.module.js';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { ServiceRequestsModule } from './service-requests/service-requests.modul
     RidersModule,
     ChatModule,
     ServiceRequestsModule,
+    ReviewsModule,
+    WalletsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

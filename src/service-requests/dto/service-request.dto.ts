@@ -52,8 +52,8 @@ export class UpdateServiceRequestStatusDto {
 }
 
 export class SubmitServicePaymentProofDto {
-  @IsIn(['CASH_ON_DELIVERY', 'BKASH', 'NAGAD'])
-  paymentMethod!: 'CASH_ON_DELIVERY' | 'BKASH' | 'NAGAD';
+  @IsIn(['CASH_ON_DELIVERY', 'BKASH', 'NAGAD', 'WALLET'])
+  paymentMethod!: 'CASH_ON_DELIVERY' | 'BKASH' | 'NAGAD' | 'WALLET';
 
   @IsOptional()
   @IsString()

@@ -28,8 +28,8 @@ export class CreateOrderDto {
   @IsString()
   organizationId: string;
 
-  @IsIn(['CASH_ON_DELIVERY', 'BKASH', 'NAGAD', 'SKODEPAY'])
-  paymentMethod: 'CASH_ON_DELIVERY' | 'BKASH' | 'NAGAD' | 'SKODEPAY';
+  @IsIn(['CASH_ON_DELIVERY', 'BKASH', 'NAGAD', 'SKODEPAY', 'WALLET'])
+  paymentMethod: 'CASH_ON_DELIVERY' | 'BKASH' | 'NAGAD' | 'SKODEPAY' | 'WALLET';
 
   @IsOptional()
   @IsNumber()
