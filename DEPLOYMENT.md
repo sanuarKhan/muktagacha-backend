@@ -95,7 +95,14 @@ If (1) works but (2) returns no `Access-Control-Allow-Origin` → fix `CORS_ORIG
 ## 5. Known gaps to be aware of before real customers use this
 
 - SMS notifications are built but need HTTPSMS_API_KEY / HTTPSMS_FROM set to actually send (same httpSMS account already used for the DMC/English Village project can be reused, or a separate one if you want these kept financially/organizationally separate)
-- No password reset flow yet (Phase 1 scope was login/register only — add this before wide public use)
+- ~~No password reset flow yet~~ **DONE** — users who forget their password
+  can reset it from `/forgot-password`: enter phone → receive a 6-digit code
+  by SMS → set a new password. SMS (not email) because accounts here are
+  identified by phone number; the User model has no email field.
+  Requires `HTTPSMS_API_KEY` / `HTTPSMS_FROM` to actually deliver the code —
+  without them the code is only written to the server log and no user can
+  complete a reset, so treat those two vars as REQUIRED in production now,
+  not optional.
 - No payment verification for bKash/Nagad yet — Phase 1 is "enter payment method, vendor collects manually" by design, matching the trust-first sequencing from the plan
 - No rate limiting on the API yet — fine for an initial small-town launch, worth adding before any wider marketing push
 
