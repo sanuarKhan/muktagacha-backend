@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 import { ChatService } from './chat.service.js';
 import { GroupsService } from './groups.service.js';
 import { DirectMessagesService } from './direct-messages.service.js';
+import { getJwtSecret } from '../auth/jwt-secret.js';
 
 interface AuthedSocket extends Socket {
   data: { userId: string; role: string };
@@ -50,7 +51,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         (client.handshake.headers.authorization as string | undefined)?.replace(/^Bearer\s+/i, '');
       if (!token) throw new Error('No token provided');
 
-      const payload = jwt.verify(token, process.env.JWT_SECRET ?? 'dev-secret-change-me') as {
+      const payload = jwt.verify(token, getJwtSecret()) as {
         sub: string;
         role: string;
       };

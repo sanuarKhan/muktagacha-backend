@@ -1,5 +1,49 @@
 # Muktagacha — Deployment Checklist
 
+## 0. Environment variables (READ THIS FIRST)
+
+See `.env.example` for the full annotated list. The three that will stop the
+app from starting at all if missing:
+
+| Variable | Required | Generate with |
+|---|---|---|
+| `DATABASE_URL` | always | Supabase → Transaction pooler URI (port 6543) |
+| `JWT_SECRET` | always (hard-fails in production) | `openssl rand -hex 32` |
+| `SECRET_ENCRYPTION_KEY` | always | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` |
+| `CORS_ORIGIN` | in production | the exact frontend origin, e.g. `https://muktagacha.vercel.app` |
+
+**Three failure modes that all look like "login is broken" but are different
+problems — check in this order:**
+
+1. **Backend never started.** If `SECRET_ENCRYPTION_KEY` is unset the process
+   throws during `onModuleInit` — *after* it has already printed every
+   "Mapped {/auth/login, POST} route" line, so the logs look healthy right up
+   until the crash. Scroll to the very END of the deploy log. The frontend
+   shows a CORS error in this case too, because a dead server sends no CORS
+   headers — so "CORS error" does NOT necessarily mean CORS is misconfigured.
+2. **`CORS_ORIGIN` doesn't match.** Must be the exact origin: scheme included,
+   no trailing slash, no path. `https://muktagacha.vercel.app/` (trailing
+   slash) will NOT match. Preview deploys get their own origins — add them
+   comma-separated or they'll be blocked.
+3. **Wrong `NEXT_PUBLIC_API_URL` on the frontend.** It's baked in at BUILD
+   time, not read at runtime — changing it in the Vercel dashboard does
+   nothing until you REDEPLOY.
+
+Quick triage from your terminal (bypasses the browser's CORS layer entirely):
+
+```bash
+# 1. Is the backend alive at all? Expect: "Hello World!"
+curl https://<your-backend-host>/
+
+# 2. Does CORS allow your frontend? Expect an Access-Control-Allow-Origin header.
+curl -i -X OPTIONS https://<your-backend-host>/auth/login \
+  -H "Origin: https://muktagacha.vercel.app" \
+  -H "Access-Control-Request-Method: POST"
+```
+
+If (1) fails → the server is down, it is not a CORS problem.
+If (1) works but (2) returns no `Access-Control-Allow-Origin` → fix `CORS_ORIGIN`.
+
 ## 1. Database — Supabase (free tier)
 
 1. Create a new Supabase project at supabase.com (name it e.g. "muktagacha-prod")

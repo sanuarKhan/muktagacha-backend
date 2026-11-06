@@ -1,7 +1,11 @@
-import { Injectable, ForbiddenException, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SendDirectMessageDto, StartDirectConversationDto } from './dto/chat.dto.js';
-import { ChatGateway } from './chat.gateway.js';
+// See chat.tokens.ts for why this is a type-only import + token injection:
+// chat.gateway <-> direct-messages.service is an ESM cycle, and a value
+// import makes emitDecoratorMetadata crash the app on boot.
+import type { ChatGateway } from './chat.gateway.js';
+import { CHAT_GATEWAY } from './chat.tokens.js';
 import { maskName } from './privacy.util.js';
 
 const SAFE_USER_SELECT = {
@@ -29,7 +33,7 @@ function maskParticipant<T extends { fullName: string } | null | undefined>(
 export class DirectMessagesService {
   constructor(
     private prisma: PrismaService,
-    @Inject(forwardRef(() => ChatGateway)) private gateway: ChatGateway,
+    @Inject(CHAT_GATEWAY) private gateway: ChatGateway,
   ) {}
 
   // Always store the pair sorted so (A,B) and (B,A) can never both exist -

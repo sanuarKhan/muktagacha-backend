@@ -1,7 +1,19 @@
-import { Injectable, ForbiddenException, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateGroupDto, CreateTopicDto, CreatePostDto } from './dto/group.dto.js';
-import { ChatGateway } from './chat.gateway.js';
+// NOTE: `import type` (not a value import) is deliberate and load-bearing.
+// chat.gateway imports this service and this service needs the gateway back,
+// so the two files form an ESM circular dependency. `forwardRef` alone fixes
+// Nest's DI graph but NOT the module-evaluation order: with a value import,
+// TypeScript's `emitDecoratorMetadata` emits
+//   __metadata("design:paramtypes", [PrismaService, ChatGateway])
+// which dereferences ChatGateway at module-eval time and crashed the whole
+// app on boot with "Cannot access 'ChatGateway' before initialization".
+// A type-only import is erased at compile time, so the cycle never has to
+// resolve eagerly; we inject by string token (see CHAT_GATEWAY in
+// chat.module.ts) instead of by class reference.
+import type { ChatGateway } from './chat.gateway.js';
+import { CHAT_GATEWAY } from './chat.tokens.js';
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -20,7 +32,7 @@ function maskAnonymous<T extends { isAnonymous?: boolean; author?: unknown }>(it
 export class GroupsService {
   constructor(
     private prisma: PrismaService,
-    @Inject(forwardRef(() => ChatGateway)) private gateway: ChatGateway,
+    @Inject(CHAT_GATEWAY) private gateway: ChatGateway,
   ) {}
 
   // Discord-style: any logged-in user can create a group, becomes its
