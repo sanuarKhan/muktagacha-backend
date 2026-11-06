@@ -125,6 +125,7 @@ model User {
   directConversationsAsB DirectConversation[] @relation("DirectConversationsAsB")
   directMessagesSent     DirectMessage[]      @relation("DirectMessagesSent")
   replyVotesCast         ReplyVote[]          @relation("ReplyVotesCast")
+  passwordResetCodes     PasswordResetCode[]  @relation("PasswordResets")
   ordersReceivedAsGift   Order[]              @relation("OrdersReceivedAsGift")
   organizationsVerified  Organization[]       @relation("OrganizationsVerifiedBy")
   fraudFlagsReviewed     FraudFlag[]          @relation("FraudFlagsReviewed")
@@ -1072,4 +1073,37 @@ model SlotBooking {
 
   @@index([studentId])
   @@map("slot_bookings")
+}
+
+// ---------------------------------------------------------------------------
+// Password reset via SMS one-time code.
+//
+// Login identity on this platform is a PHONE NUMBER, not an email, and the
+// httpSMS integration is already wired up for order notifications — so an
+// emailed reset link would be the wrong shape here. A short numeric code sent
+// by SMS matches how every other BD app does this and needs no new service.
+//
+// Security decisions, deliberate:
+//  - Only a HASH of the code is stored (same bcrypt treatment as a password).
+//    A leaked database row therefore cannot be replayed to seize an account.
+//  - Codes expire (expiresAt) and are single-use (consumedAt).
+//  - attempts is capped server-side so a 6-digit code cannot be brute-forced.
+//  - Rows are kept after use rather than deleted, giving an audit trail of
+//    reset activity on an account.
+// ---------------------------------------------------------------------------
+model PasswordResetCode {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation("PasswordResets", fields: [userId], references: [id], onDelete: Cascade)
+
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_codes")
 }
