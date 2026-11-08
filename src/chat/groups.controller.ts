@@ -2,12 +2,19 @@ import { Controller, Get, Post, Delete, Param, Body, Query, UseGuards, Req } fro
 import { GroupsService } from './groups.service.js';
 import { CreateGroupDto, CreateTopicDto, CreatePostDto } from './dto/group.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { Public } from '../auth/public.decorator.js';
 
 @Controller('groups')
 @UseGuards(JwtAuthGuard)
 export class GroupsController {
   constructor(private groupsService: GroupsService) {}
 
+  // Browsing groups is intentionally PUBLIC — this is a discovery list, the
+  // same idea as public Discord server discovery. Requiring a token here
+  // meant the community page silently rendered "No groups yet" for everyone,
+  // including logged-out visitors, even when groups existed in the database.
+  // Creating, joining and posting still require auth.
+  @Public()
   @Get()
   listGroups(@Query('area') area?: string, @Query('ward') ward?: string) {
     return this.groupsService.listGroups(area, ward);
