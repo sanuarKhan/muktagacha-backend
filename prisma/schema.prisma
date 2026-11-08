@@ -210,6 +210,22 @@ model Organization {
   avgRating   Decimal? @db.Decimal(3, 2)
   reviewCount Int      @default(0)
 
+  // --- Per-vendor SMS gateway ---------------------------------------------
+  // Each vendor connects THEIR OWN Android phone to the shared SMS gateway,
+  // so marketing goes out from THEIR number and is paid for by THEIR SIM.
+  //
+  // Without this, every vendor's campaign would be sent through the platform
+  // phone: one number blasting all shops' customers, which carriers flag as
+  // spam and which puts the platform's SIM at risk.
+  //
+  // smsGatewayPassword is the device password issued by the gateway. It is
+  // stored encrypted at rest (see SecretCryptoService) and never returned to
+  // the client — the API only ever reports whether a phone is connected.
+  smsGatewayLogin    String?
+  smsGatewayPassword String?   // encrypted
+  smsGatewayPhone    String?   // the vendor's sending number, for display
+  smsGatewayLinkedAt DateTime?
+
   listings  Product[]
   orders    Order[]
   marketingContacts  MarketingContact[]

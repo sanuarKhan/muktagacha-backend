@@ -1,6 +1,12 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { VendorSmsService } from './vendor-sms.service.js';
 import { AddContactsDto, CreateCampaignDto } from './dto/marketing.dto.js';
 
 async function assertOwnerOrAdmin(
@@ -22,6 +28,7 @@ export class MarketingService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private vendorSms: VendorSmsService,
   ) {}
 
   async listContacts(organizationId: string, userId: string, role: string) {
@@ -84,6 +91,18 @@ export class MarketingService {
     dto: CreateCampaignDto,
   ) {
     await assertOwnerOrAdmin(this.prisma, organizationId, userId, role);
+
+    // A campaign MUST go out through the vendor's own phone. Refusing up
+    // front is deliberate: silently falling back to the platform number
+    // would blast every shop's customers from one SIM (carrier spam flag,
+    // and customers see a number they don't recognise).
+    const smsStatus = await this.vendorSms.getStatus(organizationId, userId);
+    if (!smsStatus.connected) {
+      throw new BadRequestException(
+        'Connect your phone before sending a campaign. Go to Marketing → SMS phone to set it up.',
+      );
+    }
+
     const contacts = await this.prisma.marketingContact.findMany({
       where: { organizationId },
     });
@@ -100,9 +119,19 @@ export class MarketingService {
     let sent = 0;
     let failed = 0;
     for (const contact of contacts) {
-      const ok = await this.notifications.sendSms(contact.phone, dto.message);
+      const ok = await this.vendorSms.sendAsVendor(
+        organizationId,
+        contact.phone,
+        dto.message,
+      );
       if (ok) sent += 1;
       else failed += 1;
+
+      // Pace the sends. Firing hundreds at once gets a normal SIM flagged
+      // as spam by BD carriers; the gateway app also rate-limits locally.
+      if (contacts.length > 1) {
+        await new Promise((r) => setTimeout(r, 1200));
+      }
     }
 
     return this.prisma.marketingCampaign.update({
