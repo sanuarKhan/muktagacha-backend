@@ -37,6 +37,11 @@ export class GroupsController {
     return this.groupsService.createPost(topicId, req.user.userId, dto);
   }
 
+  // Public for the same reason as the list: a visitor must be able to open a
+  // group and see what it is before deciding to join. Without this the
+  // group page requested details with no token, got 401, and spun forever.
+  // Topics and posts remain members-only.
+  @Public()
   @Get(':id')
   getGroup(@Param('id') id: string) {
     return this.groupsService.getGroup(id);
