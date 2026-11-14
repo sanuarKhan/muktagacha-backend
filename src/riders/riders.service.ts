@@ -12,6 +12,18 @@ import {
   MarkDeliveredDto,
   RateDeliveryDto,
 } from './dto/riders.dto.js';
+import { ORG_WITH_OWNER_SELECT } from '../organizations/public-org.select.js';
+
+// Never return whole User rows: they carry passwordHash. These are the only
+// user fields riders/vendors/students need to see on an order or booking.
+const SAFE_PERSON_SELECT = {
+  id: true,
+  phone: true,
+  fullName: true,
+  role: true,
+  area: true,
+  ward: true,
+} as const;
 
 @Injectable()
 export class RidersService {
@@ -84,7 +96,7 @@ export class RidersService {
   async assignRider(orderId: string, riderUserId: string, userId: string, role: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { organization: true, buyer: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT }, buyer: { select: SAFE_PERSON_SELECT } },
     });
     if (!order) throw new NotFoundException('Order not found');
     if (role !== 'ADMIN' && order.organization.ownerUserId !== userId) {
@@ -101,7 +113,7 @@ export class RidersService {
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: { riderId: riderUserId, status: 'OUT_FOR_DELIVERY' },
-      include: { organization: true, buyer: true, items: true, rider: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT }, buyer: { select: SAFE_PERSON_SELECT }, items: true, rider: { select: SAFE_PERSON_SELECT } },
     });
 
     if (riderProfile.user.phone) {
@@ -123,7 +135,7 @@ export class RidersService {
   async unassignRider(orderId: string, userId: string, role: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { organization: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     if (!order) throw new NotFoundException('Order not found');
     if (role !== 'ADMIN' && order.organization.ownerUserId !== userId) {

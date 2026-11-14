@@ -1,8 +1,28 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { SecretCryptoService } from '../crypto/secret-crypto.service.js';
 import { CreateOrganizationDto } from './dto/create-organization.dto.js';
+import { PUBLIC_ORG_SELECT } from './public-org.select.js';
+
+// Shop links live at /shop/<slug>. Block words that would be confusing or
+// that impersonate the platform itself.
+const RESERVED_SLUGS = new Set([
+  'admin', 'api', 'login', 'register', 'vendor', 'vendors', 'shop', 'shops',
+  'muktagacha', 'support', 'help', 'checkout', 'cart', 'orders', 'wallet',
+  'rider', 'new', 'edit', 'settings', 'official',
+]);
+
+/** Lowercase, ASCII letters/digits/hyphens only, max 40 chars. */
+export function normaliseSlug(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/g, '');
+}
 
 @Injectable()
 export class OrganizationsService {
@@ -12,11 +32,14 @@ export class OrganizationsService {
     private crypto: SecretCryptoService,
   ) {}
 
-  create(ownerUserId: string, dto: CreateOrganizationDto) {
+  async create(ownerUserId: string, dto: CreateOrganizationDto) {
     return this.prisma.organization.create({
       data: {
         ownerUserId,
         name: dto.name,
+        // Every shop gets a shareable /shop/<slug> link from day one; the
+        // vendor can change it later from their dashboard.
+        slug: await this.uniqueSlugFor(dto.name),
         logoUrl: dto.logoUrl,
         vertical: dto.vertical,
         area: dto.area,
@@ -94,6 +117,27 @@ export class OrganizationsService {
   }
 
   // Public: browse approved organizations, optionally scoped by area/ward/vertical
+  /**
+   * Build a free slug from a shop name: "TS Fashion" -> "ts-fashion", then
+   * "ts-fashion-2" etc. if taken. Bengali-only names have no ASCII letters,
+   * so they fall back to "shop-<random>" — the vendor can rename it.
+   */
+  async uniqueSlugFor(name: string, excludeId?: string): Promise<string> {
+    let base = normaliseSlug(name);
+    if (base.length < 3 || RESERVED_SLUGS.has(base)) {
+      base = `shop-${Math.random().toString(36).slice(2, 7)}`;
+    }
+    for (let n = 1; n < 50; n++) {
+      const candidate = n === 1 ? base : `${base}-${n}`.slice(0, 40);
+      const taken = await this.prisma.organization.findFirst({
+        where: { slug: candidate, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+        select: { id: true },
+      });
+      if (!taken) return candidate;
+    }
+    return `${base.slice(0, 30)}-${Date.now().toString(36)}`;
+  }
+
   findApproved(filters: { area?: string; ward?: string; vertical?: string }) {
     return this.prisma.organization.findMany({
       where: {
@@ -102,6 +146,112 @@ export class OrganizationsService {
         ...(filters.ward ? { ward: filters.ward } : {}),
         ...(filters.vertical ? { vertical: filters.vertical as any } : {}),
       },
+      // Public endpoint: never return the full row (it holds API keys,
+      // the SMS gateway password and NID photos). See PUBLIC_ORG_SELECT.
+      select: PUBLIC_ORG_SELECT,
+    });
+  }
+
+  /**
+   * Public shop page data, by slug OR id. Accepting the id too means a link
+   * keeps working for shops that haven't chosen a custom web address yet,
+   * and old links survive if a vendor later changes their slug.
+   */
+  async findPublicShop(slugOrId: string) {
+    const org = await this.prisma.organization.findFirst({
+      where: {
+        approvalStatus: 'APPROVED',
+        OR: [{ slug: slugOrId.toLowerCase() }, { id: slugOrId }],
+      },
+      select: PUBLIC_ORG_SELECT,
+    });
+    if (!org) throw new NotFoundException('Shop not found');
+
+    const products = await this.prisma.product.findMany({
+      where: { organizationId: org.id, isActive: true },
+      include: {
+        images: { orderBy: { sortOrder: 'asc' } },
+        variants: true,
+        category: true,
+        organization: { select: PUBLIC_ORG_SELECT },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return { shop: org, products };
+  }
+
+  /**
+   * Vendor edits their own shop page: web address, banner, tagline,
+   * description and social links.
+   */
+  async updateShopPage(
+    id: string,
+    userId: string,
+    role: string,
+    data: {
+      slug?: string;
+      name?: string;
+      logoUrl?: string | null;
+      bannerUrl?: string | null;
+      tagline?: string | null;
+      description?: string | null;
+      facebookUrl?: string | null;
+      whatsappNumber?: string | null;
+    },
+  ) {
+    await this.assertOwnerOrAdmin(id, userId, role);
+    const update: Record<string, unknown> = {};
+
+    if (data.slug !== undefined) {
+      const slug = normaliseSlug(data.slug);
+      if (slug.length < 3) {
+        throw new BadRequestException('Shop link must be at least 3 letters or numbers.');
+      }
+      if (RESERVED_SLUGS.has(slug)) {
+        throw new BadRequestException('That shop link is reserved. Please choose another.');
+      }
+      const taken = await this.prisma.organization.findFirst({
+        where: { slug, NOT: { id } },
+        select: { id: true },
+      });
+      if (taken) throw new BadRequestException('That shop link is already taken. Try another.');
+      update.slug = slug;
+    }
+
+    if (data.name !== undefined) {
+      const name = data.name.trim();
+      if (name.length < 2) throw new BadRequestException('Shop name is too short.');
+      update.name = name.slice(0, 80);
+    }
+
+    const text = (v: string | null | undefined, max: number) =>
+      v === undefined ? undefined : v === null ? null : v.trim().slice(0, max) || null;
+
+    if (data.logoUrl !== undefined) update.logoUrl = text(data.logoUrl, 1000);
+    if (data.bannerUrl !== undefined) update.bannerUrl = text(data.bannerUrl, 1000);
+    if (data.tagline !== undefined) update.tagline = text(data.tagline, 120);
+    if (data.description !== undefined) update.description = text(data.description, 2000);
+
+    if (data.facebookUrl !== undefined) {
+      const fb = text(data.facebookUrl, 300);
+      if (fb && !/^https?:\/\/([a-z0-9-]+\.)?(facebook\.com|fb\.com|fb\.me)\//i.test(fb)) {
+        throw new BadRequestException('Facebook link must start with https://facebook.com/');
+      }
+      update.facebookUrl = fb;
+    }
+    if (data.whatsappNumber !== undefined) {
+      const wa = text(data.whatsappNumber, 20);
+      if (wa && !/^\+?\d{10,15}$/.test(wa.replace(/[\s-]/g, ''))) {
+        throw new BadRequestException('WhatsApp number looks invalid. Use digits only, e.g. 01712345678.');
+      }
+      update.whatsappNumber = wa ? wa.replace(/[\s-]/g, '') : null;
+    }
+
+    return this.prisma.organization.update({
+      where: { id },
+      data: update,
+      select: PUBLIC_ORG_SELECT,
     });
   }
 

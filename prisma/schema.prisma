@@ -210,6 +210,20 @@ model Organization {
   avgRating   Decimal? @db.Decimal(3, 2)
   reviewCount Int      @default(0)
 
+  // --- Public shop page ---------------------------------------------------
+  // Each approved shop gets its own shareable page at /shop/<slug>, which the
+  // vendor posts on Facebook, WhatsApp, a printed card, etc. — so it should
+  // look like THEIR brand, not just a row in the marketplace.
+  //
+  // slug is unique and URL-safe; null until the vendor (or a backfill) sets
+  // one. Pages fall back to /shop/<id> so a link never 404s.
+  slug           String?  @unique
+  bannerUrl      String?  @db.Text
+  tagline        String?
+  description    String?  @db.Text
+  facebookUrl    String?
+  whatsappNumber String?
+
   // --- Per-vendor SMS gateway ---------------------------------------------
   // Each vendor connects THEIR OWN Android phone to the shared SMS gateway,
   // so marketing goes out from THEIR number and is paid for by THEIR SIM.

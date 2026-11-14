@@ -12,6 +12,7 @@ import {
 import type { ChatGateway } from './chat.gateway.js';
 import { CHAT_GATEWAY } from './chat.tokens.js';
 import { maskName } from './privacy.util.js';
+import { ORG_WITH_OWNER_SELECT } from '../organizations/public-org.select.js';
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -90,7 +91,7 @@ export class ChatService {
   private async assertConversationAccess(conversationId: string, userId: string) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: { organization: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     if (!conversation) throw new NotFoundException('Conversation not found');
     const isBuyer = conversation.buyerId === userId;

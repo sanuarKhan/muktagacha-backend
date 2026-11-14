@@ -30,6 +30,36 @@ export class OrganizationsController {
     return this.orgsService.findApproved({ area, ward, vertical });
   }
 
+  // Public shop page: /shop/<slug> on the website. Accepts a slug or an id,
+  // returns the shop's public profile plus its active products. Declared
+  // BEFORE any ':id' route so "public" isn't mistaken for an id.
+  @Get('public/:slugOrId')
+  findPublicShop(@Param('slugOrId') slugOrId: string) {
+    return this.orgsService.findPublicShop(slugOrId);
+  }
+
+  // Vendor edits their shop page (link, banner, tagline, description,
+  // social links). Owner or admin only — enforced in the service.
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/shop-page')
+  updateShopPage(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      slug?: string;
+      name?: string;
+      logoUrl?: string | null;
+      bannerUrl?: string | null;
+      tagline?: string | null;
+      description?: string | null;
+      facebookUrl?: string | null;
+      whatsappNumber?: string | null;
+    },
+  ) {
+    return this.orgsService.updateShopPage(id, req.user.userId, req.user.role, body ?? {});
+  }
+
   // Vendor self-signup — any authenticated user can request to open a
   // storefront; it stays PENDING until an admin approves it.
   @UseGuards(JwtAuthGuard)

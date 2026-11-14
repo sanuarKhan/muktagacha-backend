@@ -8,6 +8,7 @@ import {
   UpdateServiceRequestStatusDto,
   SubmitServicePaymentProofDto,
 } from './dto/service-request.dto.js';
+import { ORG_WITH_OWNER_SELECT } from '../organizations/public-org.select.js';
 
 const SAFE_BUYER_SELECT = {
   id: true,
@@ -54,7 +55,7 @@ export class ServiceRequestsService {
       },
       include: {
         buyer: { select: SAFE_BUYER_SELECT },
-        organization: true,
+        organization: { select: ORG_WITH_OWNER_SELECT },
         category: true,
       },
     });
@@ -77,7 +78,7 @@ export class ServiceRequestsService {
   findMine(buyerId: string) {
     return this.prisma.serviceRequest.findMany({
       where: { buyerId },
-      include: { organization: true, category: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT }, category: true },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -95,7 +96,7 @@ export class ServiceRequestsService {
       where: { id },
       include: {
         buyer: { select: SAFE_BUYER_SELECT },
-        organization: true,
+        organization: { select: ORG_WITH_OWNER_SELECT },
         category: true,
       },
     });
@@ -124,7 +125,7 @@ export class ServiceRequestsService {
         quoteNote: dto.quoteNote,
         quotedAt: new Date(),
       },
-      include: { buyer: { select: SAFE_BUYER_SELECT }, organization: true },
+      include: { buyer: { select: SAFE_BUYER_SELECT }, organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     await this.notifications
       .sendSms(
@@ -142,7 +143,7 @@ export class ServiceRequestsService {
   async updateStatus(id: string, userId: string, role: string, dto: UpdateServiceRequestStatusDto) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      include: { organization: true, buyer: { select: SAFE_BUYER_SELECT } },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT }, buyer: { select: SAFE_BUYER_SELECT } },
     });
     if (!request) throw new NotFoundException('Service request not found');
     const isBuyer = request.buyerId === userId;
@@ -193,7 +194,7 @@ export class ServiceRequestsService {
         status: next,
         completedAt: next === 'COMPLETED' ? new Date() : undefined,
       },
-      include: { buyer: { select: SAFE_BUYER_SELECT }, organization: true },
+      include: { buyer: { select: SAFE_BUYER_SELECT }, organization: { select: ORG_WITH_OWNER_SELECT } },
     });
 
     // Wallet-paid bookings held in escrow get their credit refunded back
@@ -314,7 +315,7 @@ export class ServiceRequestsService {
   async verifyPayment(id: string, userId: string, role: string, verification: 'VERIFIED' | 'REJECTED') {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      include: { organization: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     if (!request) throw new NotFoundException('Service request not found');
     if (role !== 'ADMIN' && request.organization.ownerUserId !== userId) {
@@ -329,7 +330,7 @@ export class ServiceRequestsService {
   private async assertProviderOwner(id: string, userId: string, role: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      include: { organization: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     if (!request) throw new NotFoundException('Service request not found');
     if (role !== 'ADMIN' && request.organization.ownerUserId !== userId) {

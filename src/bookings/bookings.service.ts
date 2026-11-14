@@ -7,6 +7,7 @@ import {
   BookSlotDto,
   SubmitSlotPaymentProofDto,
 } from './dto/booking.dto.js';
+import { ORG_WITH_OWNER_SELECT } from '../organizations/public-org.select.js';
 
 const SAFE_STUDENT_SELECT = {
   id: true,
@@ -83,7 +84,7 @@ export class BookingsService {
   async cancelSlot(slotId: string, userId: string, role: string) {
     const slot = await this.prisma.bookingSlot.findUnique({
       where: { id: slotId },
-      include: { organization: true, booking: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT }, booking: true },
     });
     if (!slot) throw new NotFoundException('Slot not found');
     if (role !== 'ADMIN' && slot.organization.ownerUserId !== userId) {
@@ -116,7 +117,7 @@ export class BookingsService {
   async bookSlot(slotId: string, studentId: string, dto: BookSlotDto) {
     const slot = await this.prisma.bookingSlot.findUnique({
       where: { id: slotId },
-      include: { organization: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     if (!slot) throw new NotFoundException('Slot not found');
     if (slot.organization.ownerUserId === studentId) {
@@ -158,7 +159,7 @@ export class BookingsService {
   findMyBookings(studentId: string) {
     return this.prisma.slotBooking.findMany({
       where: { studentId },
-      include: { slot: { include: { organization: true, category: true } } },
+      include: { slot: { include: { organization: { select: ORG_WITH_OWNER_SELECT }, category: true } } },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -166,7 +167,7 @@ export class BookingsService {
   async findOne(id: string, userId: string, role: string) {
     const booking = await this.prisma.slotBooking.findUnique({
       where: { id },
-      include: { slot: { include: { organization: true } }, student: { select: SAFE_STUDENT_SELECT } },
+      include: { slot: { include: { organization: { select: ORG_WITH_OWNER_SELECT } } }, student: { select: SAFE_STUDENT_SELECT } },
     });
     if (!booking) throw new NotFoundException('Booking not found');
     const isStudent = booking.studentId === userId;
@@ -183,7 +184,7 @@ export class BookingsService {
   async setMeetingLink(id: string, userId: string, role: string, meetingLink: string) {
     const booking = await this.prisma.slotBooking.findUnique({
       where: { id },
-      include: { slot: { include: { organization: true } } },
+      include: { slot: { include: { organization: { select: ORG_WITH_OWNER_SELECT } } } },
     });
     if (!booking) throw new NotFoundException('Booking not found');
     if (role !== 'ADMIN' && booking.slot.organization.ownerUserId !== userId) {
@@ -201,7 +202,7 @@ export class BookingsService {
   async markCompleted(id: string, userId: string, role: string) {
     const booking = await this.prisma.slotBooking.findUnique({
       where: { id },
-      include: { slot: { include: { organization: true } } },
+      include: { slot: { include: { organization: { select: ORG_WITH_OWNER_SELECT } } } },
     });
     if (!booking) throw new NotFoundException('Booking not found');
     if (role !== 'ADMIN' && booking.slot.organization.ownerUserId !== userId) {
@@ -260,7 +261,7 @@ export class BookingsService {
   async verifyPayment(id: string, userId: string, role: string, verification: 'VERIFIED' | 'REJECTED') {
     const booking = await this.prisma.slotBooking.findUnique({
       where: { id },
-      include: { slot: { include: { organization: true } } },
+      include: { slot: { include: { organization: { select: ORG_WITH_OWNER_SELECT } } } },
     });
     if (!booking) throw new NotFoundException('Booking not found');
     if (role !== 'ADMIN' && booking.slot.organization.ownerUserId !== userId) {

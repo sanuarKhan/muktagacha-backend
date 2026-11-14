@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto.js';
+import { PUBLIC_ORG_SELECT } from '../organizations/public-org.select.js';
 
 const PRODUCT_INCLUDE = {
   images: { orderBy: { sortOrder: 'asc' as const } },
   variants: true,
   category: true,
-  organization: true,
+  organization: { select: PUBLIC_ORG_SELECT },
 };
 
 @Injectable()

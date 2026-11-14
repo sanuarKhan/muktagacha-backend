@@ -10,6 +10,7 @@ import {
   SubmitPaymentProofDto,
   VerifyPaymentDto,
 } from './dto/order.dto.js';
+import { ORG_WITH_OWNER_SELECT } from '../organizations/public-org.select.js';
 
 const SAFE_BUYER_SELECT = {
   id: true,
@@ -165,7 +166,7 @@ export class OrdersService {
           items: true,
           buyer: { select: SAFE_BUYER_SELECT },
           recipient: { select: SAFE_BUYER_SELECT },
-          organization: true,
+          organization: { select: ORG_WITH_OWNER_SELECT },
         },
       });
 
@@ -224,7 +225,7 @@ export class OrdersService {
       where: { buyerId },
       include: {
         items: { include: { product: true, variant: true } },
-        organization: true,
+        organization: { select: ORG_WITH_OWNER_SELECT },
         recipient: { select: SAFE_BUYER_SELECT },
       },
       orderBy: { createdAt: 'desc' },
@@ -240,7 +241,7 @@ export class OrdersService {
       where: { recipientId, isGift: true },
       include: {
         items: { include: { product: true, variant: true } },
-        organization: true,
+        organization: { select: ORG_WITH_OWNER_SELECT },
         // Only expose the sender's identity if they chose NOT to stay
         // anonymous - otherwise this field is omitted entirely rather
         // than relying on the frontend to remember to hide it.
@@ -278,7 +279,7 @@ export class OrdersService {
         items: { include: { product: true, variant: true } },
         buyer: { select: SAFE_BUYER_SELECT },
         recipient: { select: SAFE_BUYER_SELECT },
-        organization: true,
+        organization: { select: ORG_WITH_OWNER_SELECT },
         rider: { select: { fullName: true, phone: true } },
       },
     });
@@ -365,7 +366,7 @@ export class OrdersService {
         data: { status: 'CONFIRMED', paymentVerification: 'VERIFIED', paymentVerifiedAt: new Date() },
         include: {
           buyer: { select: SAFE_BUYER_SELECT },
-          organization: true,
+          organization: { select: ORG_WITH_OWNER_SELECT },
           items: { include: { product: true, variant: true } },
         },
       });
@@ -384,7 +385,7 @@ export class OrdersService {
   ) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { organization: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     if (!order) throw new NotFoundException('Order not found');
 
@@ -424,7 +425,7 @@ export class OrdersService {
       data: { status: dto.status },
       include: {
         buyer: { select: SAFE_BUYER_SELECT },
-        organization: true,
+        organization: { select: ORG_WITH_OWNER_SELECT },
         items: { include: { product: true, variant: true } },
       },
     });
@@ -551,7 +552,7 @@ export class OrdersService {
   ) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { organization: true, buyer: { select: SAFE_BUYER_SELECT } },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT }, buyer: { select: SAFE_BUYER_SELECT } },
     });
     if (!order) throw new NotFoundException('Order not found');
     if (role !== 'ADMIN' && order.organization.ownerUserId !== userId) {
@@ -573,7 +574,7 @@ export class OrdersService {
       },
       include: {
         buyer: { select: SAFE_BUYER_SELECT },
-        organization: true,
+        organization: { select: ORG_WITH_OWNER_SELECT },
         items: { include: { product: true, variant: true } },
       },
     });
@@ -618,7 +619,7 @@ export class OrdersService {
   ) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { organization: true },
+      include: { organization: { select: ORG_WITH_OWNER_SELECT } },
     });
     if (!order) throw new NotFoundException('Order not found');
     if (role !== 'ADMIN' && order.organization.ownerUserId !== userId) {

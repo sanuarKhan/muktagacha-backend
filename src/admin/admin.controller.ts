@@ -62,7 +62,11 @@ export class AdminController {
   async allVendors() {
     return this.prisma.organization.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { owner: true, _count: { select: { listings: true } } },
+      // owner: true would ship each vendor's passwordHash to the browser.
+      include: {
+        owner: { select: { id: true, fullName: true, phone: true, role: true } },
+        _count: { select: { listings: true } },
+      },
     });
   }
 
