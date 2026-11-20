@@ -18,7 +18,11 @@ export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
   async sendSms(to: string, message: string): Promise<boolean> {
-    // Our own gateway first.
+    // Our own gateway first — retried once, because the tunnel to the VPS
+    // can drop a single request while reconnecting (seen 20 Nov: 3 reset
+    // codes in 8 minutes never reached the gateway while it was up).
+    if (await this.sendViaGateway(to, message)) return true;
+    await new Promise((r) => setTimeout(r, 2000));
     if (await this.sendViaGateway(to, message)) return true;
     // Then the legacy provider, if it is still configured.
     return this.sendViaHttpSms(to, message);
