@@ -62,10 +62,13 @@ export class AdminController {
   async allVendors() {
     return this.prisma.organization.findMany({
       orderBy: { createdAt: 'desc' },
-      // owner: true would ship each vendor's passwordHash to the browser.
+      // owner: true would ship each vendor's passwordHash to the browser;
+      // encrypted API keys / SMS gateway password never leave the server.
+      omit: { cloudinaryApiSecretEnc: true, skodePayApiKeyEnc: true, smsGatewayPassword: true },
       include: {
         owner: { select: { id: true, fullName: true, phone: true, role: true } },
-        _count: { select: { listings: true } },
+        // orders/bookings/reviews decide whether the shop can be deleted
+        _count: { select: { listings: true, orders: true, serviceRequests: true, bookingSlots: true, shopReviews: true } },
       },
     });
   }

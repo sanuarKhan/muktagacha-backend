@@ -5,6 +5,14 @@ import { SecretCryptoService } from '../crypto/secret-crypto.service.js';
 import { CreateOrganizationDto } from './dto/create-organization.dto.js';
 import { PUBLIC_ORG_SELECT } from './public-org.select.js';
 
+// Secrets never leave the server — not even to the shop's own owner or an
+// admin (they're write-only: the settings screens send new values in).
+export const OWNER_HIDDEN_FIELDS = {
+  cloudinaryApiSecretEnc: true,
+  skodePayApiKeyEnc: true,
+  smsGatewayPassword: true,
+} as const;
+
 // Shop links live at /shop/<slug>. Block words that would be confusing or
 // that impersonate the platform itself.
 const RESERVED_SLUGS = new Set([
@@ -105,7 +113,10 @@ export class OrganizationsService {
   }
 
   findMine(ownerUserId: string) {
-    return this.prisma.organization.findMany({ where: { ownerUserId } });
+    return this.prisma.organization.findMany({
+      where: { ownerUserId },
+      omit: OWNER_HIDDEN_FIELDS,
+    });
   }
 
   // Admin-only: list organizations awaiting review
@@ -113,6 +124,7 @@ export class OrganizationsService {
     return this.prisma.organization.findMany({
       where: { approvalStatus: 'PENDING' },
       orderBy: { createdAt: 'asc' },
+      omit: OWNER_HIDDEN_FIELDS,
     });
   }
 
@@ -263,19 +275,131 @@ export class OrganizationsService {
     if (!org) throw new NotFoundException('Organization not found');
     const updated = await this.prisma.organization.update({
       where: { id },
-      data: { approvalStatus: 'APPROVED' },
+      data: { approvalStatus: 'APPROVED', approvalNote: null },
+      omit: OWNER_HIDDEN_FIELDS,
     });
     await this.notifications.notifyVendorApproved(org.owner.phone, org.name);
     return updated;
   }
 
-  async reject(id: string) {
+  async reject(id: string, note?: string) {
+    const org = await this.prisma.organization.findUnique({ where: { id }, include: { owner: true } });
+    if (!org) throw new NotFoundException('Organization not found');
+    const reason = note?.trim().slice(0, 500) || null;
+    const updated = await this.prisma.organization.update({
+      where: { id },
+      data: { approvalStatus: 'REJECTED', approvalNote: reason },
+      omit: OWNER_HIDDEN_FIELDS,
+    });
+    await this.notifications.notifyVendorRejected(org.owner.phone, org.name, reason);
+    return updated;
+  }
+
+  // Vendor fixed their shop after a rejection → back into the admin's
+  // pending queue. Only the owner, only from REJECTED.
+  async resubmit(id: string, userId: string) {
     const org = await this.prisma.organization.findUnique({ where: { id } });
+    if (!org || org.ownerUserId !== userId) throw new ForbiddenException('Not your organization');
+    if (org.approvalStatus !== 'REJECTED') {
+      throw new BadRequestException('Only a rejected shop can be sent for review again.');
+    }
+    return this.prisma.organization.update({
+      where: { id },
+      data: { approvalStatus: 'PENDING', approvalNote: null },
+      omit: OWNER_HIDDEN_FIELDS,
+    });
+  }
+
+  // ── Admin: full control over any shop ───────────────────────────────
+
+  // Change status in any direction (e.g. un-reject, suspend an approved
+  // shop by sending it back to PENDING/REJECTED).
+  async setStatus(id: string, status: 'PENDING' | 'APPROVED' | 'REJECTED', note?: string) {
+    if (!['PENDING', 'APPROVED', 'REJECTED'].includes(status)) throw new BadRequestException('Invalid status');
+    if (status === 'APPROVED') return this.approve(id);
+    if (status === 'REJECTED') return this.reject(id, note);
+    const org = await this.prisma.organization.findUnique({ where: { id }, select: { id: true } });
     if (!org) throw new NotFoundException('Organization not found');
     return this.prisma.organization.update({
       where: { id },
-      data: { approvalStatus: 'REJECTED' },
+      data: { approvalStatus: 'PENDING', approvalNote: null },
+      omit: OWNER_HIDDEN_FIELDS,
     });
+  }
+
+  // Admin edits the basic shop details on the vendor's behalf.
+  async adminUpdate(
+    id: string,
+    data: {
+      name?: string;
+      vertical?: string;
+      area?: string | null;
+      ward?: string | null;
+      deliveryRadiusKm?: number | null;
+      bkashNumber?: string | null;
+      nagadNumber?: string | null;
+      logoUrl?: string | null;
+      tagline?: string | null;
+      description?: string | null;
+      facebookUrl?: string | null;
+      whatsappNumber?: string | null;
+    },
+  ) {
+    const org = await this.prisma.organization.findUnique({ where: { id }, select: { id: true } });
+    if (!org) throw new NotFoundException('Organization not found');
+    const text = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) || null : v === null ? null : undefined);
+    const update: Record<string, unknown> = {};
+    if (data.name !== undefined) {
+      const name = String(data.name).trim();
+      if (name.length < 2) throw new BadRequestException('Shop name is too short.');
+      update.name = name.slice(0, 120);
+    }
+    if (data.vertical !== undefined) {
+      if (!['MARKETPLACE', 'PHARMACY', 'SERVICES'].includes(String(data.vertical))) throw new BadRequestException('Invalid shop type');
+      update.vertical = data.vertical;
+    }
+    if (data.deliveryRadiusKm !== undefined) {
+      const r = data.deliveryRadiusKm === null ? null : Number(data.deliveryRadiusKm);
+      if (r !== null && (!Number.isFinite(r) || r < 0 || r > 999)) throw new BadRequestException('Invalid delivery radius');
+      update.deliveryRadiusKm = r;
+    }
+    for (const [k, max] of [['area', 80], ['ward', 80], ['bkashNumber', 20], ['nagadNumber', 20], ['logoUrl', 1000], ['tagline', 160], ['description', 3000], ['facebookUrl', 300], ['whatsappNumber', 20]] as const) {
+      const v = text((data as any)[k], max);
+      if (v !== undefined) update[k] = v;
+    }
+    return this.prisma.organization.update({ where: { id }, data: update, omit: OWNER_HIDDEN_FIELDS });
+  }
+
+  // Delete a shop. A shop with orders / bookings / service requests keeps
+  // its history for buyers and accounting, so it can't be hard-deleted —
+  // reject it instead (hidden from the site). An empty shop is removed
+  // with its products and shop-only data.
+  async adminDelete(id: string) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id },
+      select: { id: true, name: true, _count: { select: { orders: true, serviceRequests: true, bookingSlots: true, shopReviews: true } } },
+    });
+    if (!org) throw new NotFoundException('Organization not found');
+    const c = org._count;
+    if (c.orders || c.serviceRequests || c.bookingSlots || c.shopReviews) {
+      throw new BadRequestException(
+        `"${org.name}" has orders, bookings or reviews, so it can't be deleted (their history must be kept). Reject it instead — it will be hidden from the website.`,
+      );
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const products = await tx.product.findMany({ where: { organizationId: id }, select: { id: true } });
+      const productIds = products.map((p) => p.id);
+      if (productIds.length) {
+        // Order items reference products without cascade; an empty shop has
+        // no orders, so these are only safety for stray rows.
+        await tx.orderItem.deleteMany({ where: { productId: { in: productIds } } });
+        await tx.product.deleteMany({ where: { id: { in: productIds } } });
+      }
+      await tx.conversation.deleteMany({ where: { organizationId: id } });
+      await tx.shopQuestion.deleteMany({ where: { organizationId: id } });
+      await tx.organization.delete({ where: { id } });
+    });
+    return { deleted: true, name: org.name };
   }
 
   // ───────────────────────── Vendor trust verification ─────────────────────────
@@ -313,6 +437,7 @@ export class OrganizationsService {
   findPendingVerifications() {
     return this.prisma.organization.findMany({
       where: { verificationStatus: 'PENDING_REVIEW' },
+      omit: OWNER_HIDDEN_FIELDS,
       include: { owner: { select: { id: true, fullName: true, phone: true } } },
       orderBy: { createdAt: 'asc' },
     });

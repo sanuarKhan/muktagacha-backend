@@ -154,6 +154,9 @@ model Organization {
   ward              String?
   deliveryRadiusKm  Decimal?       @db.Decimal(4, 1)
   approvalStatus    ApprovalStatus @default(PENDING)
+  // Why an admin rejected the shop — shown to the vendor so they can fix
+  // it and send for review again. Cleared on approval / resubmission.
+  approvalNote      String?        @db.Text
   createdAt         DateTime       @default(now())
 
   // Vendor trust verification - OPTIONAL, separate from approvalStatus.

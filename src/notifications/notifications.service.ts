@@ -142,6 +142,13 @@ export class NotificationsService {
     );
   }
 
+  async notifyVendorRejected(ownerPhone: string, orgName: string, reason?: string | null) {
+    await this.sendSms(
+      ownerPhone,
+      `Your storefront "${orgName}" needs changes before it can go live on Muktagacha.${reason ? ` Reason: ${reason}.` : ''} Fix it in your vendor dashboard and tap "Send for review again".`,
+    );
+  }
+
   // A gift order's recipient needs a DIFFERENT message than the buyer's own
   // order-confirmation SMS - from their side this is "someone sent you
   // something", not "your order was placed". Respects giftSenderAnonymous:

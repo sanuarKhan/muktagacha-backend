@@ -6,6 +6,7 @@ import {
   Param,
   Body,
   Query,
+  Delete,
   UseGuards,
   Req,
 } from '@nestjs/common';
@@ -144,8 +145,39 @@ export class OrganizationsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Patch(':id/reject')
-  reject(@Param('id') id: string) {
-    return this.orgsService.reject(id);
+  reject(@Param('id') id: string, @Body() body: { note?: string }) {
+    return this.orgsService.reject(id, body?.note);
+  }
+
+  // Vendor: fixed the shop after a rejection → send for review again.
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/resubmit')
+  resubmit(@Req() req: any, @Param('id') id: string) {
+    return this.orgsService.resubmit(id, req.user.userId);
+  }
+
+  // Admin: move any shop to any status (un-reject, suspend, re-approve).
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id/status')
+  setStatus(@Param('id') id: string, @Body() body: { status: 'PENDING' | 'APPROVED' | 'REJECTED'; note?: string }) {
+    return this.orgsService.setStatus(id, body?.status, body?.note);
+  }
+
+  // Admin: edit shop details on the vendor's behalf.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Patch(':id/admin-edit')
+  adminUpdate(@Param('id') id: string, @Body() body: any) {
+    return this.orgsService.adminUpdate(id, body ?? {});
+  }
+
+  // Admin: delete a shop that has no orders/bookings/reviews.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @Delete(':id')
+  adminDelete(@Param('id') id: string) {
+    return this.orgsService.adminDelete(id);
   }
 
   // Vendor submits their trade license and/or NID photo (already uploaded
