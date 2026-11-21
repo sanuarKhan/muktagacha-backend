@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsBoolean, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsBoolean, MaxLength, IsIn, ValidateIf } from 'class-validator';
 
 export class CreateGroupDto {
   @IsString()
@@ -55,15 +55,39 @@ export class CreateTopicDto {
   @IsNotEmpty()
   @MaxLength(60)
   name!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  ownerPostsOnly?: boolean;
+}
+
+export class UpdateTopicDto {
+  @IsOptional()
+  @IsBoolean()
+  ownerPostsOnly?: boolean;
 }
 
 export class CreatePostDto {
   @IsString()
-  @IsNotEmpty()
   @MaxLength(4000)
   body!: string;
 
   @IsOptional()
   @IsBoolean()
   isAnonymous?: boolean;
+
+  @IsOptional()
+  @IsIn(['IMAGE', 'PDF'])
+  attachmentKind?: 'IMAGE' | 'PDF';
+
+  @ValidateIf((o) => !!o.attachmentKind)
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  attachmentRef?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  attachmentName?: string;
 }

@@ -91,6 +91,40 @@ export class CloudinaryService {
     };
   }
 
+  // Platform (shared) account — for community files that don't belong to
+  // a shop. Same signed-upload pattern; secret never leaves the server.
+  private platformCreds() {
+    const cloudName = process.env.CLOUDINARY_FALLBACK_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_FALLBACK_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_FALLBACK_API_SECRET;
+    if (!cloudName || !apiKey || !apiSecret) {
+      throw new InternalServerErrorException('File upload is not configured on the platform.');
+    }
+    return { cloudName, apiKey, apiSecret };
+  }
+
+  get platformCloudName() {
+    return process.env.CLOUDINARY_FALLBACK_CLOUD_NAME ?? '';
+  }
+
+  createPlatformSignedUpload(folder: string): SignedUpload {
+    const { cloudName, apiKey, apiSecret } = this.platformCreds();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = createHash('sha1').update(`folder=${folder}&timestamp=${timestamp}` + apiSecret).digest('hex');
+    return { cloudName, apiKey, timestamp, signature, folder };
+  }
+
+  /** Short-lived (10 min) download link for a raw file such as a PDF. */
+  signedRawDownloadUrl(publicId: string, ttlSeconds = 600) {
+    const { cloudName, apiKey, apiSecret } = this.platformCreds();
+    const timestamp = Math.floor(Date.now() / 1000);
+    const params: Record<string, string | number> = { expires_at: timestamp + ttlSeconds, public_id: publicId, timestamp, type: 'upload' };
+    const toSign = Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join('&');
+    const signature = createHash('sha1').update(toSign + apiSecret).digest('hex');
+    const qs = new URLSearchParams({ ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])), api_key: apiKey, signature });
+    return `https://api.cloudinary.com/v1_1/${cloudName}/raw/download?${qs.toString()}`;
+  }
+
   async saveCredentials(
     organizationId: string,
     cloudName: string,

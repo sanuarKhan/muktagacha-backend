@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
 import { GroupsService } from './groups.service.js';
-import { CreateGroupDto, CreateTopicDto, CreatePostDto, UpdateGroupDto, JoinGroupDto } from './dto/group.dto.js';
+import { CreateGroupDto, CreateTopicDto, CreatePostDto, UpdateGroupDto, JoinGroupDto, UpdateTopicDto } from './dto/group.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { Public } from '../auth/public.decorator.js';
 
@@ -48,6 +48,16 @@ export class GroupsController {
     return this.groupsService.createPost(topicId, req.user.userId, dto);
   }
 
+  @Patch('topics/:topicId')
+  updateTopic(@Req() req: any, @Param('topicId') topicId: string, @Body() dto: UpdateTopicDto) {
+    return this.groupsService.updateTopic(topicId, req.user.userId, dto);
+  }
+
+  @Get('posts/:postId/file')
+  fileLink(@Req() req: any, @Param('postId') postId: string) {
+    return this.groupsService.fileLink(postId, req.user.userId);
+  }
+
   // Public for the same reason as the list: a visitor must be able to open a
   // group and see what it is before deciding to join. Without this the
   // group page requested details with no token, got 401, and spun forever.
@@ -77,6 +87,11 @@ export class GroupsController {
   @Post(':id/invite/reset')
   resetInvite(@Req() req: any, @Param('id') id: string) {
     return this.groupsService.resetInvite(id, req.user.userId);
+  }
+
+  @Get(':id/upload-signature')
+  uploadSignature(@Req() req: any, @Param('id') id: string) {
+    return this.groupsService.uploadSignature(id, req.user.userId);
   }
 
   @Get(':id/members')

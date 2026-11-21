@@ -726,6 +726,8 @@ model GroupTopic {
   groupId   String
   group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   name      String
+  // Lessons / announcements: only owner + moderators can post here.
+  ownerPostsOnly Boolean @default(false)
   creatorId String
   creator   User     @relation("GroupTopicsCreated", fields: [creatorId], references: [id])
   createdAt DateTime @default(now())
@@ -745,6 +747,12 @@ model GroupPost {
   author      User       @relation("GroupPostsAuthored", fields: [authorId], references: [id])
   body        String     @db.Text
   isAnonymous Boolean    @default(false)
+  // Optional attachment. IMAGE → attachmentRef is the Cloudinary URL.
+  // PDF → attachmentRef is the Cloudinary public_id; members get a
+  // short-lived signed download link (never a permanent public URL).
+  attachmentKind String?
+  attachmentRef  String?
+  attachmentName String?
   createdAt   DateTime   @default(now())
 
   @@index([topicId, createdAt])

@@ -15,6 +15,7 @@ import { CreateGroupDto, CreateTopicDto, CreatePostDto } from './dto/group.dto.j
 // chat.module.ts) instead of by class reference.
 import type { ChatGateway } from './chat.gateway.js';
 import { CHAT_GATEWAY } from './chat.tokens.js';
+import { CloudinaryService } from '../cloudinary/cloudinary.service.js';
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -39,6 +40,7 @@ export class GroupsService {
   constructor(
     private prisma: PrismaService,
     @Inject(CHAT_GATEWAY) private gateway: ChatGateway,
+    private cloudinary: CloudinaryService,
   ) {}
 
   // Discord-style: any logged-in user can create a group, becomes its
@@ -257,10 +259,14 @@ export class GroupsService {
   // joined - matches the "people will create their own group own message
   // topics" request, so topic creation isn't owner/moderator-gated.
   async createTopic(groupId: string, userId: string, dto: CreateTopicDto) {
-    await this.assertMember(groupId, userId);
+    const m = await this.assertMember(groupId, userId);
+    const isManager = m.role === 'OWNER' || m.role === 'MODERATOR';
+    if (dto.ownerPostsOnly && !isManager) {
+      throw new ForbiddenException('Only the group owner or a moderator can make an announcements topic');
+    }
     try {
       return await this.prisma.groupTopic.create({
-        data: { groupId, name: dto.name, creatorId: userId },
+        data: { groupId, name: dto.name, creatorId: userId, ownerPostsOnly: !!dto.ownerPostsOnly },
       });
     } catch (err: any) {
       if (err?.code === 'P2002') {
@@ -288,19 +294,71 @@ export class GroupsService {
       include: { author: { select: SAFE_USER_SELECT } },
       orderBy: { createdAt: 'asc' },
     });
-    return posts.map((p) => maskAnonymous(p));
+    return posts.map((p) => this.forClient(maskAnonymous(p)));
   }
 
   async createPost(topicId: string, userId: string, dto: CreatePostDto) {
     const topic = await this.prisma.groupTopic.findUnique({ where: { id: topicId } });
     if (!topic) throw new NotFoundException('Topic not found');
-    await this.assertMember(topic.groupId, userId);
+    const m = await this.assertMember(topic.groupId, userId);
+    if (topic.ownerPostsOnly && m.role !== 'OWNER' && m.role !== 'MODERATOR') {
+      throw new ForbiddenException('Only the group owner or a moderator can post in this topic');
+    }
+    const body = (dto.body ?? '').trim();
+    if (!body && !dto.attachmentKind) throw new BadRequestException('Write something or attach a file');
+
+    // Attachments must be files uploaded to THIS group's folder on our own
+    // Cloudinary account — no linking arbitrary outside files.
+    let attachment: { attachmentKind: string; attachmentRef: string; attachmentName: string | null } | null = null;
+    if (dto.attachmentKind && dto.attachmentRef) {
+      const folder = `muktagacha/groups/${topic.groupId}/`;
+      const cn = this.cloudinary.platformCloudName;
+      if (dto.attachmentKind === 'IMAGE') {
+        const ok =
+          dto.attachmentRef.startsWith(`https://res.cloudinary.com/${cn}/image/upload/`) && dto.attachmentRef.includes(`/${folder}`);
+        if (!ok) throw new BadRequestException('Invalid image');
+      } else if (!dto.attachmentRef.startsWith(folder)) {
+        throw new BadRequestException('Invalid file');
+      }
+      attachment = {
+        attachmentKind: dto.attachmentKind,
+        attachmentRef: dto.attachmentRef,
+        attachmentName: dto.attachmentName?.trim().slice(0, 120) || null,
+      };
+    }
     const post = await this.prisma.groupPost.create({
-      data: { topicId, authorId: userId, body: dto.body, isAnonymous: !!dto.isAnonymous },
+      data: { topicId, authorId: userId, body, isAnonymous: !!dto.isAnonymous, ...(attachment ?? {}) },
       include: { author: { select: SAFE_USER_SELECT } },
     });
-    const masked = maskAnonymous(post);
+    const masked = this.forClient(maskAnonymous(post));
     this.gateway.emitNewPost(topicId, masked);
     return masked;
+  }
+
+  // PDFs: never expose the storage id — the page asks for a fresh link.
+  private forClient<T extends { attachmentKind?: string | null; attachmentRef?: string | null }>(p: T) {
+    if (p.attachmentKind === 'PDF') return { ...p, attachmentRef: null };
+    return p;
+  }
+
+  /** Signed upload slot for a group file (members only; owner-only topics: managers). */
+  async uploadSignature(groupId: string, userId: string) {
+    await this.assertMember(groupId, userId);
+    return this.cloudinary.createPlatformSignedUpload(`muktagacha/groups/${groupId}`);
+  }
+
+  /** 10-minute download link for a PDF in a post — members only. */
+  async fileLink(postId: string, userId: string) {
+    const post = await this.prisma.groupPost.findUnique({ where: { id: postId }, include: { topic: { select: { groupId: true } } } });
+    if (!post || post.attachmentKind !== 'PDF' || !post.attachmentRef) throw new NotFoundException('File not found');
+    await this.assertMember(post.topic.groupId, userId);
+    return { url: this.cloudinary.signedRawDownloadUrl(post.attachmentRef), name: post.attachmentName };
+  }
+
+  async updateTopic(topicId: string, userId: string, dto: { ownerPostsOnly?: boolean }) {
+    const topic = await this.prisma.groupTopic.findUnique({ where: { id: topicId } });
+    if (!topic) throw new NotFoundException('Topic not found');
+    await this.assertManager(topic.groupId, userId);
+    return this.prisma.groupTopic.update({ where: { id: topicId }, data: { ownerPostsOnly: !!dto.ownerPostsOnly } });
   }
 }

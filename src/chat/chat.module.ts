@@ -7,8 +7,10 @@ import { DirectMessagesService } from './direct-messages.service.js';
 import { DirectMessagesController } from './direct-messages.controller.js';
 import { ChatGateway } from './chat.gateway.js';
 import { CHAT_GATEWAY } from './chat.tokens.js';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module.js';
 
 @Module({
+  imports: [CloudinaryModule],
   controllers: [ChatController, GroupsController, DirectMessagesController],
   providers: [
     ChatService,
