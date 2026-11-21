@@ -63,15 +63,48 @@ export class GroupsService {
   // residents can find their own neighborhood's groups first. Open
   // discovery (not members-only) - joining is one click, matching how
   // Discord server discovery / public communities work.
-  listGroups(area?: string, ward?: string) {
+  listGroups(area?: string, ward?: string, q?: string, sort?: string) {
+    const query = (q ?? '').trim().slice(0, 60);
     return this.prisma.group.findMany({
-      where: { ...(area ? { area } : {}), ...(ward ? { ward } : {}) },
+      where: {
+        ...(area ? { area } : {}),
+        ...(ward ? { ward } : {}),
+        ...(query
+          ? {
+              OR: [
+                { name: { contains: query, mode: 'insensitive' as const } },
+                { description: { contains: query, mode: 'insensitive' as const } },
+                { area: { contains: query, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
       include: {
         creator: { select: SAFE_USER_SELECT },
         _count: { select: { members: true, topics: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: sort === 'popular' ? [{ members: { _count: 'desc' } }, { createdAt: 'desc' }] : { createdAt: 'desc' },
+      take: 100,
     });
+  }
+
+  // "My groups": the groups I'm a member of (owner first).
+  async myGroups(userId: string) {
+    const rows = await this.prisma.groupMember.findMany({
+      where: { userId },
+      include: {
+        group: {
+          include: {
+            creator: { select: SAFE_USER_SELECT },
+            _count: { select: { members: true, topics: true } },
+          },
+        },
+      },
+      orderBy: { joinedAt: 'desc' },
+    });
+    return rows
+      .sort((a, b) => (a.role === 'OWNER' ? -1 : 0) - (b.role === 'OWNER' ? -1 : 0))
+      .map((r) => ({ ...r.group, myRole: r.role }));
   }
 
   private async assertMember(groupId: string, userId: string) {

@@ -16,8 +16,19 @@ export class GroupsController {
   // Creating, joining and posting still require auth.
   @Public()
   @Get()
-  listGroups(@Query('area') area?: string, @Query('ward') ward?: string) {
-    return this.groupsService.listGroups(area, ward);
+  listGroups(
+    @Query('area') area?: string,
+    @Query('ward') ward?: string,
+    @Query('q') q?: string,
+    @Query('sort') sort?: string,
+  ) {
+    return this.groupsService.listGroups(area, ward, q, sort);
+  }
+
+  // Before ':id' so "mine" isn't read as a group id.
+  @Get('mine')
+  myGroups(@Req() req: any) {
+    return this.groupsService.myGroups(req.user.userId);
   }
 
   @Post()
