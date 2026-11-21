@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { Injectable, ForbiddenException, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateGroupDto, CreateTopicDto, CreatePostDto } from './dto/group.dto.js';
@@ -28,6 +29,11 @@ function maskAnonymous<T extends { isAnonymous?: boolean; author?: unknown }>(it
   return { ...item, author: ANONYMOUS_AUTHOR };
 }
 
+// Short, unguessable, URL-safe invite code (e.g. "k3P9xQ2mVa7d").
+function newInviteCode() {
+  return randomBytes(9).toString('base64url');
+}
+
 @Injectable()
 export class GroupsService {
   constructor(
@@ -46,6 +52,8 @@ export class GroupsService {
           description: dto.description,
           area: dto.area,
           ward: dto.ward,
+          isPrivate: !!dto.isPrivate,
+          inviteCode: dto.isPrivate ? newInviteCode() : null,
           creatorId: userId,
         },
       });
@@ -67,6 +75,7 @@ export class GroupsService {
     const query = (q ?? '').trim().slice(0, 60);
     return this.prisma.group.findMany({
       where: {
+        isPrivate: false, // private groups are invite-only, never listed
         ...(area ? { area } : {}),
         ...(ward ? { ward } : {}),
         ...(query
@@ -79,6 +88,7 @@ export class GroupsService {
             }
           : {}),
       },
+      omit: { inviteCode: true },
       include: {
         creator: { select: SAFE_USER_SELECT },
         _count: { select: { members: true, topics: true } },
@@ -104,7 +114,7 @@ export class GroupsService {
     });
     return rows
       .sort((a, b) => (a.role === 'OWNER' ? -1 : 0) - (b.role === 'OWNER' ? -1 : 0))
-      .map((r) => ({ ...r.group, myRole: r.role }));
+      .map(({ group: { inviteCode: _code, ...g }, role }) => ({ ...g, myRole: role }));
   }
 
   private async assertMember(groupId: string, userId: string) {
@@ -115,7 +125,11 @@ export class GroupsService {
     return membership;
   }
 
-  async getGroup(groupId: string) {
+  // Public page. Private groups are visible only to members or to someone
+  // holding the right invite code — everyone else gets "not found" (we
+  // don't even confirm a private group exists). The invite code itself is
+  // returned only to the owner/moderators.
+  async getGroup(groupId: string, userId?: string, invite?: string) {
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
       include: {
@@ -124,17 +138,108 @@ export class GroupsService {
       },
     });
     if (!group) throw new NotFoundException('Group not found');
-    return group;
+    const membership = userId
+      ? await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } })
+      : null;
+    const inviteOk = !!invite && !!group.inviteCode && invite === group.inviteCode;
+    if (group.isPrivate && !membership && !inviteOk) throw new NotFoundException('Group not found');
+
+    const { inviteCode, topics, ...rest } = group;
+    const canManage = membership?.role === 'OWNER' || membership?.role === 'MODERATOR';
+    return {
+      ...rest,
+      topics: membership || !group.isPrivate ? topics : [],
+      myRole: membership?.role ?? null,
+      ...(canManage ? { inviteCode } : {}),
+    };
   }
 
-  async joinGroup(groupId: string, userId: string) {
+  async joinGroup(groupId: string, userId: string, invite?: string) {
     const group = await this.prisma.group.findUnique({ where: { id: groupId } });
     if (!group) throw new NotFoundException('Group not found');
+    if (group.isPrivate) {
+      const already = await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
+      if (!already && (!invite || invite !== group.inviteCode)) {
+        throw new ForbiddenException('This is a private group. Ask the owner for an invite link.');
+      }
+    }
     return this.prisma.groupMember.upsert({
       where: { groupId_userId: { groupId, userId } },
       update: {},
       create: { groupId, userId, role: 'MEMBER' },
     });
+  }
+
+  // ── Owner / moderator tools ─────────────────────────────────────────
+  private async assertManager(groupId: string, userId: string, ownerOnly = false) {
+    const m = await this.assertMember(groupId, userId);
+    if (m.role !== 'OWNER' && (ownerOnly || m.role !== 'MODERATOR')) {
+      throw new ForbiddenException(ownerOnly ? 'Only the group owner can do this' : 'Only the group owner or a moderator can do this');
+    }
+    return m;
+  }
+
+  async updateGroup(groupId: string, userId: string, dto: { name?: string; description?: string; isPrivate?: boolean }) {
+    await this.assertManager(groupId, userId, true);
+    const current = await this.prisma.group.findUnique({ where: { id: groupId } });
+    if (!current) throw new NotFoundException('Group not found');
+    const goingPrivate = dto.isPrivate === true && !current.isPrivate;
+    const updated = await this.prisma.group.update({
+      where: { id: groupId },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+        ...(dto.description !== undefined ? { description: dto.description.trim() || null } : {}),
+        ...(dto.isPrivate !== undefined ? { isPrivate: dto.isPrivate } : {}),
+        ...(goingPrivate && !current.inviteCode ? { inviteCode: newInviteCode() } : {}),
+      },
+    });
+    return updated;
+  }
+
+  /** New invite code — the old link stops working. */
+  async resetInvite(groupId: string, userId: string) {
+    await this.assertManager(groupId, userId, true);
+    const g = await this.prisma.group.update({ where: { id: groupId }, data: { inviteCode: newInviteCode() } });
+    return { inviteCode: g.inviteCode };
+  }
+
+  /** Invite code for owner/moderator (created on first use for public groups too). */
+  async getInvite(groupId: string, userId: string) {
+    await this.assertManager(groupId, userId);
+    let g = await this.prisma.group.findUnique({ where: { id: groupId } });
+    if (!g) throw new NotFoundException('Group not found');
+    if (!g.inviteCode) g = await this.prisma.group.update({ where: { id: groupId }, data: { inviteCode: newInviteCode() } });
+    return { inviteCode: g.inviteCode };
+  }
+
+  async listMembers(groupId: string, userId: string) {
+    await this.assertMember(groupId, userId);
+    return this.prisma.groupMember.findMany({
+      where: { groupId, user: { deletedAt: null } },
+      select: { userId: true, role: true, joinedAt: true, user: { select: SAFE_USER_SELECT } },
+      orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
+    });
+  }
+
+  async removeMember(groupId: string, actorId: string, targetUserId: string) {
+    const actor = await this.assertManager(groupId, actorId);
+    const target = await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId: targetUserId } } });
+    if (!target) throw new NotFoundException('Not a member');
+    if (target.role === 'OWNER') throw new BadRequestException("The owner can't be removed");
+    if (target.role === 'MODERATOR' && actor.role !== 'OWNER') throw new ForbiddenException('Only the owner can remove a moderator');
+    await this.prisma.groupMember.delete({ where: { id: target.id } });
+    const topics = await this.prisma.groupTopic.findMany({ where: { groupId }, select: { id: true } });
+    this.gateway.removeUserFromRooms(targetUserId, topics.map((t) => `topic:${t.id}`));
+    return { ok: true };
+  }
+
+  async setMemberRole(groupId: string, actorId: string, targetUserId: string, role: 'MODERATOR' | 'MEMBER') {
+    await this.assertManager(groupId, actorId, true);
+    const target = await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId: targetUserId } } });
+    if (!target) throw new NotFoundException('Not a member');
+    if (target.role === 'OWNER') throw new BadRequestException("The owner's role can't be changed");
+    await this.prisma.groupMember.update({ where: { id: target.id }, data: { role } });
+    return { ok: true };
   }
 
   async leaveGroup(groupId: string, userId: string) {

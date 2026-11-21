@@ -20,6 +20,34 @@ export class CreateGroupDto {
   @IsString()
   @MaxLength(100)
   ward?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isPrivate?: boolean;
+}
+
+export class UpdateGroupDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isPrivate?: boolean;
+}
+
+export class JoinGroupDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  invite?: string;
 }
 
 export class CreateTopicDto {

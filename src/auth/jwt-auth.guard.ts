@@ -1,4 +1,4 @@
-import { ExecutionContext, Injectable } from '@nestjs/common';
+import { ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { IS_PUBLIC_KEY } from './public.decorator.js';
@@ -9,6 +9,17 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     super();
   }
 
+  // Public routes call this too (optional login) — don't throw there.
+  handleRequest(err: any, user: any, _info: any, context: ExecutionContext) {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return user || undefined;
+    if (err || !user) throw err || new UnauthorizedException();
+    return user;
+  }
+
   canActivate(context: ExecutionContext) {
     // Routes marked @Public() skip auth entirely. Checked on the handler
     // first, then the class, so a single route can opt out of a guard that
@@ -17,7 +28,16 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) return true;
+    if (isPublic) {
+      // Public route: never block, but if a valid token is sent, attach the
+      // user so the route can personalise (e.g. a member opening their
+      // private group). A bad/expired token is simply ignored here.
+      const req = context.switchToHttp().getRequest();
+      if (!req?.headers?.authorization) return true;
+      return Promise.resolve(super.canActivate(context) as boolean | Promise<boolean>)
+        .then(() => true)
+        .catch(() => true);
+    }
     return super.canActivate(context);
   }
 }

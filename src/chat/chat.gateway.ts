@@ -138,6 +138,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { ok: true };
   }
 
+  // A removed group member must stop receiving live posts immediately.
+  removeUserFromRooms(userId: string, rooms: string[]) {
+    for (const [, socket] of this.server.sockets.sockets) {
+      if ((socket as AuthedSocket).data?.userId === userId) rooms.forEach((r) => socket.leave(r));
+    }
+  }
+
   emitNewPost(topicId: string, post: unknown) {
     this.server.to(`topic:${topicId}`).emit('topic:post', post);
   }

@@ -1,6 +1,6 @@
-import { Controller, Get, Post, Delete, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Req } from '@nestjs/common';
 import { GroupsService } from './groups.service.js';
-import { CreateGroupDto, CreateTopicDto, CreatePostDto } from './dto/group.dto.js';
+import { CreateGroupDto, CreateTopicDto, CreatePostDto, UpdateGroupDto, JoinGroupDto } from './dto/group.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { Public } from '../auth/public.decorator.js';
 
@@ -54,13 +54,44 @@ export class GroupsController {
   // Topics and posts remain members-only.
   @Public()
   @Get(':id')
-  getGroup(@Param('id') id: string) {
-    return this.groupsService.getGroup(id);
+  getGroup(@Req() req: any, @Param('id') id: string, @Query('invite') invite?: string) {
+    return this.groupsService.getGroup(id, req.user?.userId, invite);
   }
 
   @Post(':id/join')
-  joinGroup(@Req() req: any, @Param('id') id: string) {
-    return this.groupsService.joinGroup(id, req.user.userId);
+  joinGroup(@Req() req: any, @Param('id') id: string, @Body() dto: JoinGroupDto) {
+    return this.groupsService.joinGroup(id, req.user.userId, dto?.invite);
+  }
+
+  // ── owner / moderator ──
+  @Patch(':id')
+  updateGroup(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateGroupDto) {
+    return this.groupsService.updateGroup(id, req.user.userId, dto);
+  }
+
+  @Get(':id/invite')
+  getInvite(@Req() req: any, @Param('id') id: string) {
+    return this.groupsService.getInvite(id, req.user.userId);
+  }
+
+  @Post(':id/invite/reset')
+  resetInvite(@Req() req: any, @Param('id') id: string) {
+    return this.groupsService.resetInvite(id, req.user.userId);
+  }
+
+  @Get(':id/members')
+  listMembers(@Req() req: any, @Param('id') id: string) {
+    return this.groupsService.listMembers(id, req.user.userId);
+  }
+
+  @Delete(':id/members/:userId')
+  removeMember(@Req() req: any, @Param('id') id: string, @Param('userId') userId: string) {
+    return this.groupsService.removeMember(id, req.user.userId, userId);
+  }
+
+  @Patch(':id/members/:userId')
+  setMemberRole(@Req() req: any, @Param('id') id: string, @Param('userId') userId: string, @Body() body: { role: 'MODERATOR' | 'MEMBER' }) {
+    return this.groupsService.setMemberRole(id, req.user.userId, userId, body?.role === 'MODERATOR' ? 'MODERATOR' : 'MEMBER');
   }
 
   @Delete(':id/leave')

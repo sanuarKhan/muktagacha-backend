@@ -684,6 +684,10 @@ model Group {
   description String?  @db.Text
   area        String?
   ward        String?
+  // Private = hidden from the Community list; join only with the invite
+  // link (/community/<id>?invite=<code>). Existing groups stay public.
+  isPrivate   Boolean  @default(false)
+  inviteCode  String?  @unique
   creatorId   String
   creator     User     @relation("GroupsCreated", fields: [creatorId], references: [id])
   createdAt   DateTime @default(now())
