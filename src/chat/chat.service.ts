@@ -58,33 +58,34 @@ export class ChatService {
   ) {}
 
   // ───────────────────────── Private conversations ─────────────────────────
-  // Hard rule from the client: only a BUYER can open a NEW conversation with
-  // a shop. A vendor can never cold-message a buyer - they can only reply
-  // inside a conversation the buyer already started. Enforced here, not just
-  // in the UI, since the API itself must refuse it even if someone calls it
-  // directly.
+  // Rule: a SHOP can never cold-message a customer — it can only reply
+  // inside a conversation the customer started. The customer side may be
+  // anyone logged in: a buyer, a vendor shopping at another shop, or the
+  // admin. (Previously only BUYER accounts could start one, so vendors and
+  // the admin had no way to contact a shop at all.) Enforced here, not just
+  // in the UI.
 
-  async listMyConversations(userId: string, role: string) {
-    if (role === 'VENDOR') {
-      // Vendor sees every conversation across all shops they own.
-      const convos = await this.prisma.conversation.findMany({
-        where: { organization: { ownerUserId: userId } },
-        include: {
-          buyer: { select: SAFE_USER_SELECT },
-          organization: { select: { id: true, name: true, logoUrl: true } },
-          messages: { orderBy: { createdAt: 'desc' }, take: 1 },
-        },
-        orderBy: { updatedAt: 'desc' },
-      });
-      return convos.map((c) => ({ ...c, buyer: maskParticipant(c.buyer) }));
-    }
-    return this.prisma.conversation.findMany({
-      where: { buyerId: userId },
+  async listMyConversations(userId: string, _role?: string) {
+    const convos = await this.prisma.conversation.findMany({
+      where: { OR: [{ buyerId: userId }, { organization: { ownerUserId: userId } }] },
       include: {
-        organization: { select: { id: true, name: true, logoUrl: true } },
+        buyer: { select: SAFE_USER_SELECT },
+        organization: { select: { id: true, name: true, logoUrl: true, ownerUserId: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
       orderBy: { updatedAt: 'desc' },
+    });
+    // side = which role *I* play in this chat. Shop owners see the
+    // customer's masked name; customers see the shop. ownerUserId stays
+    // server-side.
+    return convos.map(({ organization, ...c }) => {
+      const iAmShop = organization.ownerUserId === userId && c.buyerId !== userId;
+      return {
+        ...c,
+        side: iAmShop ? ('shop' as const) : ('customer' as const),
+        organization: { id: organization.id, name: organization.name, logoUrl: organization.logoUrl },
+        buyer: iAmShop ? maskParticipant(c.buyer) : undefined,
+      };
     });
   }
 
@@ -117,11 +118,11 @@ export class ChatService {
   // second "start" with the same shop just appends to the existing thread
   // instead of creating a duplicate one.
   async startConversation(buyerId: string, role: string, dto: StartConversationDto) {
-    if (role !== 'BUYER') {
-      throw new ForbiddenException('Only buyers can start a new conversation with a shop');
-    }
     const org = await this.prisma.organization.findUnique({ where: { id: dto.organizationId } });
     if (!org) throw new NotFoundException('Shop not found');
+    if (org.approvalStatus !== 'APPROVED' && role !== 'ADMIN') {
+      throw new BadRequestException('This shop is not open for messages yet.');
+    }
     if (org.ownerUserId === buyerId) {
       throw new BadRequestException("You can't message your own shop");
     }
