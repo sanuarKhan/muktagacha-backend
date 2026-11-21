@@ -120,6 +120,62 @@ export class DirectMessagesService {
     return masked;
   }
 
+  // "New chat" search in the chat box.
+  //  • Shops: any approved shop (public anyway) — not my own.
+  //  • People: only people I share a community group with (their names are
+  //    already visible to me in group posts) — never the whole user base.
+  //    The admin can find any account, to contact vendors/customers.
+  // Phone numbers are never returned.
+  async contacts(userId: string, role: string, q?: string) {
+    const query = (q ?? '').trim().slice(0, 60);
+    const nameFilter = query ? { contains: query, mode: 'insensitive' as const } : undefined;
+
+    const shops = await this.prisma.organization.findMany({
+      where: {
+        approvalStatus: 'APPROVED',
+        NOT: { ownerUserId: userId },
+        ...(nameFilter ? { name: nameFilter } : {}),
+      },
+      select: { id: true, name: true, slug: true, logoUrl: true, area: true },
+      orderBy: { name: 'asc' },
+      take: 12,
+    });
+
+    let people: { id: string; fullName: string; role: string; via: string }[];
+    if (role === 'ADMIN') {
+      const users = await this.prisma.user.findMany({
+        where: { deletedAt: null, NOT: { id: userId }, ...(nameFilter ? { fullName: nameFilter } : {}) },
+        select: { id: true, fullName: true, role: true },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      });
+      people = users.map((u) => ({ ...u, via: u.role.toLowerCase() }));
+    } else {
+      const myGroups = await this.prisma.groupMember.findMany({
+        where: { userId },
+        select: { groupId: true, group: { select: { name: true } } },
+      });
+      const groupName = new Map(myGroups.map((g) => [g.groupId, g.group.name]));
+      const mates = myGroups.length
+        ? await this.prisma.groupMember.findMany({
+            where: {
+              groupId: { in: myGroups.map((g) => g.groupId) },
+              NOT: { userId },
+              user: { deletedAt: null, ...(nameFilter ? { fullName: nameFilter } : {}) },
+            },
+            select: { groupId: true, user: { select: { id: true, fullName: true, role: true } } },
+            take: 60,
+          })
+        : [];
+      const seen = new Map<string, { id: string; fullName: string; role: string; via: string }>();
+      for (const m of mates) {
+        if (!seen.has(m.user.id)) seen.set(m.user.id, { ...m.user, via: groupName.get(m.groupId) ?? 'your group' });
+      }
+      people = [...seen.values()].slice(0, 20);
+    }
+    return { shops, people, inGroups: role === 'ADMIN' ? null : people.length > 0 || !!query };
+  }
+
   async markRead(conversationId: string, userId: string) {
     await this.assertAccess(conversationId, userId);
     await this.prisma.directMessage.updateMany({

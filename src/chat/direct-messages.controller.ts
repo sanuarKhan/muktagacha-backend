@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, UseGuards, Req, Query } from '@nestjs/common';
 import { DirectMessagesService } from './direct-messages.service.js';
 import { SendDirectMessageDto, StartDirectConversationDto } from './dto/chat.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
@@ -9,6 +9,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 @UseGuards(JwtAuthGuard)
 export class DirectMessagesController {
   constructor(private directMessages: DirectMessagesService) {}
+
+  // "New chat" search: shops + people I share a group with (admin: anyone).
+  @Get('contacts')
+  contacts(@Req() req: any, @Query('q') q?: string) {
+    return this.directMessages.contacts(req.user.userId, req.user.role, q);
+  }
 
   @Get('conversations')
   listMyConversations(@Req() req: any) {
