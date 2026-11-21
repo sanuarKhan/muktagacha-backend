@@ -25,6 +25,7 @@ export class ProductsService {
         description: dto.description,
         basePrice: dto.basePrice,
         hasVariants: dto.hasVariants ?? false,
+        stockCount: dto.hasVariants ? null : (dto.stockCount ?? null),
         requiresPrescription: dto.requiresPrescription ?? false,
         images: dto.images?.length
           ? {
@@ -41,7 +42,7 @@ export class ProductsService {
                   sku: v.sku,
                   optionValues: v.optionValues,
                   priceOverride: v.priceOverride,
-                  stockCount: v.stockCount,
+                  stockCount: v.stockCount ?? null,
                 })),
               }
             : undefined,
@@ -132,7 +133,7 @@ export class ProductsService {
                 sku: v.sku,
                 optionValues: v.optionValues,
                 priceOverride: v.priceOverride,
-                stockCount: v.stockCount,
+                stockCount: v.stockCount ?? null,
                 isActive: true,
               },
             });
@@ -143,7 +144,7 @@ export class ProductsService {
                 sku: v.sku,
                 optionValues: v.optionValues,
                 priceOverride: v.priceOverride,
-                stockCount: v.stockCount,
+                stockCount: v.stockCount ?? null,
               },
             });
           }

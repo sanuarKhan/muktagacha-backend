@@ -292,6 +292,9 @@ model Product {
   description    String?       @db.Text
   basePrice      Decimal       @db.Decimal(10, 2)
   hasVariants    Boolean       @default(false)
+  // Stock for products WITHOUT options. null = not tracked (always
+  // available); a number = pieces left (0 = sold out).
+  stockCount     Int?
 
   // Pharmacy vertical: a vendor marks a specific medicine as requiring a
   // prescription (e.g. antibiotics) - not every pharmacy item needs one
@@ -338,7 +341,10 @@ model ProductVariant {
   sku           String?
   optionValues  Json
   priceOverride Decimal? @db.Decimal(10, 2)
-  stockCount    Int      @default(0)
+  // null = not tracked (always available); a number = pieces left.
+  // (Was "Int @default(0)", which turned an empty quantity box into
+  // "out of stock".)
+  stockCount    Int?
   isActive      Boolean  @default(true)
 
   orderItems    OrderItem[]

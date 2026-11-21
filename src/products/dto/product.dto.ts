@@ -6,6 +6,9 @@ import {
   IsArray,
   ValidateNested,
   IsObject,
+  IsInt,
+  Min,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -33,8 +36,12 @@ export class ProductVariantDto {
   @IsNumber()
   priceOverride?: number;
 
-  @IsNumber()
-  stockCount!: number;
+  // null/absent = not tracked (always available)
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsInt()
+  @Min(0)
+  stockCount?: number | null;
 }
 
 export class CreateProductDto {
@@ -58,6 +65,13 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   hasVariants?: boolean;
+
+  // Products without options. null = not tracked (always available).
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsInt()
+  @Min(0)
+  stockCount?: number | null;
 
   // Pharmacy vertical only - marks this medicine as needing a buyer-
   // uploaded prescription before the order can proceed. Ignored/false for
@@ -103,6 +117,13 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   hasVariants?: boolean;
+
+  // Products without options. null = not tracked (always available).
+  @IsOptional()
+  @ValidateIf((_o, v) => v !== null)
+  @IsInt()
+  @Min(0)
+  stockCount?: number | null;
 
   @IsOptional()
   @IsBoolean()

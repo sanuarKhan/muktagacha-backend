@@ -88,26 +88,48 @@ export class OrdersService {
           if (!variant || !variant.isActive) {
             throw new BadRequestException('That variant is not available');
           }
-          if (variant.stockCount < item.quantity) {
-            throw new BadRequestException(
-              `Only ${variant.stockCount} left in stock for ${product.name}`,
-            );
-          }
           price = variant.priceOverride
             ? Number(variant.priceOverride)
             : Number(product.basePrice);
-
-          const result = await tx.productVariant.updateMany({
-            where: { id: variant.id, stockCount: { gte: item.quantity } },
-            data: { stockCount: { decrement: item.quantity } },
-          });
-          if (result.count === 0) {
-            throw new BadRequestException(
-              `${product.name} just sold out - someone else bought the last one`,
-            );
+          // null = stock not tracked → always available
+          if (variant.stockCount !== null) {
+            if (variant.stockCount < item.quantity) {
+              throw new BadRequestException(
+                variant.stockCount === 0
+                  ? `${product.name} (${Object.values((variant.optionValues as Record<string, string>) ?? {}).join(' / ')}) is sold out`
+                  : `Only ${variant.stockCount} left in stock for ${product.name}`,
+              );
+            }
+            const result = await tx.productVariant.updateMany({
+              where: { id: variant.id, stockCount: { gte: item.quantity } },
+              data: { stockCount: { decrement: item.quantity } },
+            });
+            if (result.count === 0) {
+              throw new BadRequestException(
+                `${product.name} just sold out - someone else bought the last one`,
+              );
+            }
           }
         } else {
           price = Number(product.basePrice);
+          if (product.stockCount !== null) {
+            if (product.stockCount < item.quantity) {
+              throw new BadRequestException(
+                product.stockCount === 0
+                  ? `${product.name} is sold out`
+                  : `Only ${product.stockCount} left in stock for ${product.name}`,
+              );
+            }
+            const result = await tx.product.updateMany({
+              where: { id: product.id, stockCount: { gte: item.quantity } },
+              data: { stockCount: { decrement: item.quantity } },
+            });
+            if (result.count === 0) {
+              throw new BadRequestException(
+                `${product.name} just sold out - someone else bought the last one`,
+              );
+            }
+          }
         }
 
         itemsWithPrice.push({
@@ -207,13 +229,17 @@ export class OrdersService {
   // create() so cancelling a confirmed-but-not-yet-shipped order doesn't
   // permanently lose that stock to a sale that never actually happened.
   private async restoreStock(orderId: string) {
-    const items = await this.prisma.orderItem.findMany({
-      where: { orderId, variantId: { not: null } },
-    });
+    const items = await this.prisma.orderItem.findMany({ where: { orderId } });
     for (const item of items) {
+      // Only give back stock that is tracked (null = untracked, leave it).
       if (item.variantId) {
-        await this.prisma.productVariant.update({
-          where: { id: item.variantId },
+        await this.prisma.productVariant.updateMany({
+          where: { id: item.variantId, stockCount: { not: null } },
+          data: { stockCount: { increment: item.quantity } },
+        });
+      } else {
+        await this.prisma.product.updateMany({
+          where: { id: item.productId, stockCount: { not: null } },
           data: { stockCount: { increment: item.quantity } },
         });
       }
