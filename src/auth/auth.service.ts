@@ -40,7 +40,9 @@ export class AuthService {
       where: { phone: dto.phone },
     });
     if (existing) {
-      throw new ConflictException('A user with this phone already exists');
+      throw new ConflictException(
+        'This phone number already has an account. Please log in, or use "Forgot password" if you don\'t remember the password.',
+      );
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);

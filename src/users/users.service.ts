@@ -33,4 +33,27 @@ export class UsersService {
       take: 15,
     });
   }
+
+  // Admin → Users: every active account, newest first, with what they own.
+  async adminList(q?: string) {
+    const query = (q ?? '').trim();
+    return this.prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        ...(query
+          ? { OR: [{ fullName: { contains: query, mode: 'insensitive' } }, { phone: { contains: query } }] }
+          : {}),
+      },
+      select: {
+        ...SAFE_SEARCH_SELECT,
+        ward: true,
+        createdAt: true,
+        organizations: { select: { id: true, name: true, approvalStatus: true } },
+        riderProfile: { select: { approvalStatus: true } },
+        _count: { select: { orders: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 300,
+    });
+  }
 }

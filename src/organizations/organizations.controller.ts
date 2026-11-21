@@ -11,6 +11,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service.js';
+import { AccountDeletionService } from '../users/account-deletion.service.js';
 import { CreateOrganizationDto } from './dto/create-organization.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/roles.guard.js';
@@ -18,7 +19,10 @@ import { Roles } from '../auth/roles.decorator.js';
 
 @Controller('organizations')
 export class OrganizationsController {
-  constructor(private orgsService: OrganizationsService) {}
+  constructor(
+    private orgsService: OrganizationsService,
+    private deletion: AccountDeletionService,
+  ) {}
 
   // Public: browse approved vendors/pharmacies/services, filterable by
   // area/ward/vertical (ward-level scoping per the platform plan)
@@ -172,12 +176,12 @@ export class OrganizationsController {
     return this.orgsService.adminUpdate(id, body ?? {});
   }
 
-  // Admin: delete a shop that has no orders/bookings/reviews.
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
+  // Owner or admin: delete a shop. Empty shop → removed with its products;
+  // shop with orders/bookings/reviews → hidden (history kept).
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  adminDelete(@Param('id') id: string) {
-    return this.orgsService.adminDelete(id);
+  deleteShop(@Req() req: any, @Param('id') id: string) {
+    return this.deletion.deleteShop(id, req.user);
   }
 
   // Vendor submits their trade license and/or NID photo (already uploaded

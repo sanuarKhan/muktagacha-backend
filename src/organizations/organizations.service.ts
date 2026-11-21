@@ -370,37 +370,6 @@ export class OrganizationsService {
     return this.prisma.organization.update({ where: { id }, data: update, omit: OWNER_HIDDEN_FIELDS });
   }
 
-  // Delete a shop. A shop with orders / bookings / service requests keeps
-  // its history for buyers and accounting, so it can't be hard-deleted —
-  // reject it instead (hidden from the site). An empty shop is removed
-  // with its products and shop-only data.
-  async adminDelete(id: string) {
-    const org = await this.prisma.organization.findUnique({
-      where: { id },
-      select: { id: true, name: true, _count: { select: { orders: true, serviceRequests: true, bookingSlots: true, shopReviews: true } } },
-    });
-    if (!org) throw new NotFoundException('Organization not found');
-    const c = org._count;
-    if (c.orders || c.serviceRequests || c.bookingSlots || c.shopReviews) {
-      throw new BadRequestException(
-        `"${org.name}" has orders, bookings or reviews, so it can't be deleted (their history must be kept). Reject it instead — it will be hidden from the website.`,
-      );
-    }
-    await this.prisma.$transaction(async (tx) => {
-      const products = await tx.product.findMany({ where: { organizationId: id }, select: { id: true } });
-      const productIds = products.map((p) => p.id);
-      if (productIds.length) {
-        // Order items reference products without cascade; an empty shop has
-        // no orders, so these are only safety for stray rows.
-        await tx.orderItem.deleteMany({ where: { productId: { in: productIds } } });
-        await tx.product.deleteMany({ where: { id: { in: productIds } } });
-      }
-      await tx.conversation.deleteMany({ where: { organizationId: id } });
-      await tx.shopQuestion.deleteMany({ where: { organizationId: id } });
-      await tx.organization.delete({ where: { id } });
-    });
-    return { deleted: true, name: org.name };
-  }
 
   // ───────────────────────── Vendor trust verification ─────────────────────────
   // Optional, separate from approval. Vendor uploads a trade license
