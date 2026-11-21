@@ -210,6 +210,9 @@ export class OrganizationsService {
       description?: string | null;
       facebookUrl?: string | null;
       whatsappNumber?: string | null;
+      area?: string | null;
+      ward?: string | null;
+      deliveryRadiusKm?: number | null;
     },
   ) {
     await this.assertOwnerOrAdmin(id, userId, role);
@@ -244,6 +247,15 @@ export class OrganizationsService {
     if (data.bannerUrl !== undefined) update.bannerUrl = text(data.bannerUrl, 1000);
     if (data.tagline !== undefined) update.tagline = text(data.tagline, 120);
     if (data.description !== undefined) update.description = text(data.description, 2000);
+    if (data.area !== undefined) update.area = text(data.area, 80);
+    if (data.ward !== undefined) update.ward = text(data.ward, 80);
+    if (data.deliveryRadiusKm !== undefined) {
+      const r = data.deliveryRadiusKm === null || (data.deliveryRadiusKm as unknown) === '' ? null : Number(data.deliveryRadiusKm);
+      if (r !== null && (!Number.isFinite(r) || r < 0 || r > 999)) {
+        throw new BadRequestException('Delivery radius must be a number of km, e.g. 5.');
+      }
+      update.deliveryRadiusKm = r;
+    }
 
     if (data.facebookUrl !== undefined) {
       const fb = text(data.facebookUrl, 300);

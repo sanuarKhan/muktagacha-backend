@@ -60,6 +60,9 @@ export class OrganizationsController {
       description?: string | null;
       facebookUrl?: string | null;
       whatsappNumber?: string | null;
+      area?: string | null;
+      ward?: string | null;
+      deliveryRadiusKm?: number | null;
     },
   ) {
     return this.orgsService.updateShopPage(id, req.user.userId, req.user.role, body ?? {});
