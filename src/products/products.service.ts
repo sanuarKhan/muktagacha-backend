@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto.js';
 import { PUBLIC_ORG_SELECT } from '../organizations/public-org.select.js';
@@ -13,6 +13,64 @@ const PRODUCT_INCLUDE = {
 @Injectable()
 export class ProductsService {
   constructor(private prisma: PrismaService) {}
+
+  // SECURITY: only the shop's owner (or an admin) may create/edit/delete
+  // its products. Previously any logged-in account could change any shop's
+  // products, because the routes only checked "is logged in".
+  async assertCanManageOrg(organizationId: string, user: { userId: string; role: string }) {
+    if (user.role === 'ADMIN') return;
+    const org = await this.prisma.organization.findUnique({ where: { id: organizationId }, select: { ownerUserId: true } });
+    if (!org) throw new NotFoundException('Shop not found');
+    if (org.ownerUserId !== user.userId) throw new ForbiddenException("You can only manage your own shop's products");
+  }
+
+  async assertCanManageProduct(productId: string, user: { userId: string; role: string }) {
+    const p = await this.prisma.product.findUnique({ where: { id: productId }, select: { organizationId: true } });
+    if (!p) throw new NotFoundException('Product not found');
+    await this.assertCanManageOrg(p.organizationId, user);
+    return p;
+  }
+
+  /**
+   * Stock screen: set an exact number, add/remove pieces, or switch to
+   * "always available" (stockCount null). Works on a product without
+   * options, or on one size/colour (variantId).
+   */
+  async adjustStock(
+    productId: string,
+    user: { userId: string; role: string },
+    body: { variantId?: string; delta?: number; set?: number | null },
+  ) {
+    await this.assertCanManageProduct(productId, user);
+    const hasSet = Object.prototype.hasOwnProperty.call(body, 'set');
+    if (!hasSet && (typeof body.delta !== 'number' || !Number.isInteger(body.delta) || body.delta === 0)) {
+      throw new BadRequestException('Send a whole number change, or an exact number');
+    }
+    if (hasSet && body.set !== null && (!Number.isInteger(body.set) || (body.set as number) < 0)) {
+      throw new BadRequestException('Stock must be 0 or more');
+    }
+
+    if (body.variantId) {
+      const v = await this.prisma.productVariant.findFirst({ where: { id: body.variantId, productId } });
+      if (!v) throw new NotFoundException('Option not found');
+      if (hasSet) {
+        await this.prisma.productVariant.update({ where: { id: v.id }, data: { stockCount: body.set ?? null } });
+      } else {
+        const next = Math.max(0, (v.stockCount ?? 0) + (body.delta as number));
+        await this.prisma.productVariant.update({ where: { id: v.id }, data: { stockCount: next } });
+      }
+    } else {
+      const p = await this.prisma.product.findUnique({ where: { id: productId } });
+      if (!p) throw new NotFoundException('Product not found');
+      if (hasSet) {
+        await this.prisma.product.update({ where: { id: productId }, data: { stockCount: body.set ?? null } });
+      } else {
+        const next = Math.max(0, (p.stockCount ?? 0) + (body.delta as number));
+        await this.prisma.product.update({ where: { id: productId }, data: { stockCount: next } });
+      }
+    }
+    return this.findOne(productId);
+  }
 
   create(dto: CreateProductDto) {
     const slug = slugify(dto.name);

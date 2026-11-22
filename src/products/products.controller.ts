@@ -8,6 +8,7 @@ import {
   Body,
   Query,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { ProductsService } from './products.service.js';
 import { CreateProductDto, UpdateProductDto } from './dto/product.dto.js';
@@ -53,19 +54,33 @@ export class ProductsController {
 
   @UseGuards(JwtAuthGuard)
   @Post()
-  create(@Body() dto: CreateProductDto) {
+  async create(@Req() req: any, @Body() dto: CreateProductDto) {
+    await this.productsService.assertCanManageOrg(dto.organizationId, req.user);
     return this.productsService.create(dto);
+  }
+
+  // Stock screen: { variantId?, delta } or { variantId?, set: number|null }
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/stock')
+  adjustStock(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { variantId?: string; delta?: number; set?: number | null },
+  ) {
+    return this.productsService.adjustStock(id, req.user, body ?? {});
   }
 
   @UseGuards(JwtAuthGuard)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
+  async update(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateProductDto) {
+    await this.productsService.assertCanManageProduct(id, req.user);
     return this.productsService.update(id, dto);
   }
 
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  async remove(@Req() req: any, @Param('id') id: string) {
+    await this.productsService.assertCanManageProduct(id, req.user);
     return this.productsService.remove(id);
   }
 }
